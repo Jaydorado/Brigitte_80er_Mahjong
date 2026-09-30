@@ -4,9 +4,10 @@
  *
  * Steps: tap one free tile, tap its twin; what makes a tile free (an occupied-`above` tile, a tile
  * with both sides taken); then the three helpers Tipp, Zurück, Mischen; then "Viel Spaß!".
- * *Überspringen* and the last step call `onDone`; the returned cancel (unmount) does not, so an
- * interrupted tutorial restarts next time. The ring is one element in the board; the pointed-at
- * helper carries `tut-point`. Motion is transform/opacity only and off under reduced motion.
+ * *Überspringen* (shown on every step) and the last step's button call `onDone`; the returned
+ * cancel (unmount) does not, so an interrupted tutorial restarts next time. The ring is one element
+ * in the board; the pointed-at helper carries `tut-point`. Motion is transform/opacity only and off
+ * under reduced motion.
  */
 import { freePairs, type Action, type GameState } from '../core/game';
 import type { BoardView } from './board';
@@ -131,7 +132,6 @@ export function startTutorial(ctx: TutorialCtx): () => void {
     step = s;
     clearPointer();
     text.textContent = s.text;
-    skip.hidden = s.kind === 'end';
     next.hidden = s.kind === 'tap';
     next.textContent = s.kind === 'end' ? T.go : T.next;
     let avoid: DOMRect | null = null;

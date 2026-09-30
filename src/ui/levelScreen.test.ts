@@ -152,7 +152,7 @@ async function mount(level: LevelDef, save: SaveV1, onWon: () => void = () => {}
 function stuckSetup(): { level: LevelDef; save: SaveV1; moves: [number, number][] } {
   for (let n = 0; n < 12; n++) {
     for (const level of levels) {
-      let save = freshSave();
+      let save: SaveV1 = { ...freshSave(), tutorialDone: true };
       for (let k = 0; k < n; k++) save = nextAttempt(save, level.id).save;
       let s = dealt(level, save);
       const moves: [number, number][] = [];
@@ -170,7 +170,7 @@ function stuckSetup(): { level: LevelDef; save: SaveV1; moves: [number, number][
 describe('level screen lifecycle', () => {
   it('saves the win before the last match animates', async () => {
     const level = levels[0];
-    const save = freshSave();
+    const save: SaveV1 = { ...freshSave(), tutorialDone: true };
     await mount(level, save);
     for (const [a, b] of dealt(level, save).witness) {
       h.tap!(a);
@@ -184,7 +184,7 @@ describe('level screen lifecycle', () => {
 
   it('hands over to onWon only when the confetti has actually landed (effect clock), not after wall time', async () => {
     const level = levels[0];
-    const save = freshSave();
+    const save: SaveV1 = { ...freshSave(), tutorialDone: true };
     const onWon = vi.fn();
     await mount(level, save, onWon);
     for (const [a, b] of dealt(level, save).witness) {
@@ -253,6 +253,26 @@ describe('level screen lifecycle', () => {
       expect(h.tut).toBeNull();
       await vi.advanceTimersByTimeAsync(500);
       expect(h.tut).not.toBeNull();
+    });
+
+    it('ignores the board and the helpers until the tutorial owns them', async () => {
+      await mount(levels[0], freshSave());
+      h.tap!(dealt(levels[0], freshSave()).witness[0][0]);
+      h.hud!.hint();
+      h.hud!.shuffle();
+      h.hud!.undo();
+      expect(h.log.filter((l) => l.startsWith('play'))).toEqual([]);
+      await vi.advanceTimersByTimeAsync(500);
+      expect(h.tut).not.toBeNull();
+      h.tut!.dispatch({ type: 'hint' });
+      expect(h.log).toContain('play hint');
+    });
+
+    it('plays normally once the tutorial was done, from the first frame', async () => {
+      await mount(levels[0], done());
+      h.tap!(dealt(levels[0], done()).witness[0][0]);
+      h.hud!.hint();
+      expect(h.log.filter((l) => l.startsWith('play'))).toEqual(['play selected', 'play hint']);
     });
 
     it('does not start when done, nor on other levels', async () => {

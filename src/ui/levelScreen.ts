@@ -155,9 +155,9 @@ export function mountLevel(root: HTMLElement, level: LevelDef, deps: LevelDeps):
   area.className = 'level-area';
   const hud = createHud({
     back: () => requestLeave(),
-    hint: () => dispatch({ type: 'hint' }),
-    undo: () => dispatch({ type: 'undo' }),
-    shuffle: () => dispatch({ type: 'shuffle' }),
+    hint: () => !tutorialPending && dispatch({ type: 'hint' }),
+    undo: () => !tutorialPending && dispatch({ type: 'undo' }),
+    shuffle: () => !tutorialPending && dispatch({ type: 'shuffle' }),
   });
   const overlay = document.createElement('div');
   overlay.className = 'rotate-overlay';
@@ -180,6 +180,8 @@ export function mountLevel(root: HTMLElement, level: LevelDef, deps: LevelDeps):
   let closeStuck: (() => void) | null = null;
   /** The newest save this screen wrote (the tutorial flag and a win both build on it). */
   let saved = save;
+  /** Level 1's first run: board and helpers stay dead from the first frame until the tutorial owns them. */
+  let tutorialPending = level.id === TUTORIAL_LEVEL && !save.tutorialDone;
   let cancelTutorial: (() => void) | null = null;
   /** While the tutorial runs it owns board taps: it forwards the ones it allows to `dispatch`. */
   let tutorialTap: ((slot: number) => void) | null = null;
@@ -312,6 +314,7 @@ export function mountLevel(root: HTMLElement, level: LevelDef, deps: LevelDeps):
     const g = gen;
     tutorialTimer = window.setTimeout(() => {
       tutorialTimer = 0;
+      tutorialPending = false;
       if (g !== gen || won || leaving) return;
       const [hint, undo, shuffle] = hud.el.querySelectorAll<HTMLElement>('.hud-btn');
       cancelTutorial = startTutorial({
@@ -364,7 +367,11 @@ export function mountLevel(root: HTMLElement, level: LevelDef, deps: LevelDeps):
     }
     animator?.finishAll(); // the old board lands in the current state before the swap
     const nb = createBoard(layout, next, w);
-    nb.onTap((slot) => (tutorialTap ? tutorialTap(slot) : dispatch({ type: 'tap', slot })));
+    nb.onTap((slot) => {
+      if (tutorialPending) return;
+      if (tutorialTap) tutorialTap(slot);
+      else dispatch({ type: 'tap', slot });
+    });
     paper.place(layout, w);
     nb.el.prepend(paper.el);
     nb.fit(frame.area);
