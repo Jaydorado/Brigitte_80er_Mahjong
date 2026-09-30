@@ -177,7 +177,7 @@ export function mountLevel(root: HTMLElement, level: LevelDef, deps: LevelDeps):
     s.height = `${frame.area.h}px`;
   }
 
-  async function build(first: boolean): Promise<void> {
+  async function build(): Promise<void> {
     const gen = ++bakeGen;
     const w = frame.w;
     const dpr = atlasDpr();
@@ -201,6 +201,7 @@ export function mountLevel(root: HTMLElement, level: LevelDef, deps: LevelDeps):
     nb.fit(frame.area);
     nb.render(state);
     const old = board;
+    const first = old === null; // the first board on screen, whichever bake produced it
     const oldAtlas = atlas;
     board = nb;
     atlas = next;
@@ -226,7 +227,7 @@ export function mountLevel(root: HTMLElement, level: LevelDef, deps: LevelDeps):
     resizeRaf = 0;
     if (!alive) return;
     applyFrame();
-    if (frame.w !== requested.w || atlasDpr() !== requested.dpr) void build(false);
+    if (frame.w !== requested.w || atlasDpr() !== requested.dpr) void build();
     else board?.fit(frame.area);
   };
   const onResize = () => {
@@ -244,7 +245,7 @@ export function mountLevel(root: HTMLElement, level: LevelDef, deps: LevelDeps):
   window.addEventListener('resize', onResize);
 
   applyFrame();
-  void build(true);
+  void build();
 
   return () => {
     if (!alive) return;
