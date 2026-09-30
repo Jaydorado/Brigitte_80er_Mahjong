@@ -1,9 +1,10 @@
 /**
  * UI smoke for Brigittes Mahjong (plan Task 11): a production build under `vite preview`, driven in
  * Chromium at 640×360 and 800×360. Items are numbered as in the plan. Waits are conditions, never
- * fixed sleeps. Screenshots of every screen land in `smoke/screenshots/` (gitignored).
+ * fixed sleeps (one negative check, "a reload starts no tutorial", has to let a start delay pass).
+ * Screenshots of every screen land in `smoke/screenshots/` (gitignored).
  */
-import type { Page } from '@playwright/test';
+import type { Page, TestInfo } from '@playwright/test';
 import { clues, welcome } from '../src/content';
 import { boot, expect, expectSynced, openLevel, readSave, seedSave, shot, stateOf, test } from './helpers';
 
@@ -50,29 +51,167 @@ test('1 welcome renders in portrait and landscape; Los geht\'s opens the map', a
   await expect(overlay).toBeHidden();
 });
 
-test('3 level 1 is won with Tipp twice and the ringed tiles; letter and map follow', async ({ page }, info) => {
-  await seedSave(page, {}); // tutorialDone is seeded, so the level-1 tutorial never interferes here
+/** A first run of level 1: welcome seen, tutorial not done. */
+async function openLevelOneFresh(page: Page): Promise<void> {
+  await seedSave(page, { tutorialDone: false });
   await page.goto('/');
   await candle(page, 1).locator('.cake-hit').click();
   await page.waitForFunction(() => document.querySelector<HTMLElement>('.level')?.dataset.w !== undefined);
   await expect(hudCount(page)).toHaveText('36');
-  await shot(page, info, '03-level-1-start');
+}
 
-  let left = 36;
+const tutCard = (page: Page) => page.locator('.level .tut-card');
+const tutText = (page: Page) => page.locator('.level .tut-text');
+const tutNext = (page: Page) => page.locator('.level .tut-next');
+const tutSkip = (page: Page) => page.locator('.level .tut-skip');
+const tutRing = (page: Page) => page.locator('.level .tut-ring');
+const GO_LABEL = 'Los geht’s'; // the tutorial's last button (typographic apostrophe)
+
+/** Taps the tile the ring points at, then waits until the tutorial has moved to another step. */
+async function tapRingedTile(page: Page): Promise<void> {
+  const text = await tutText(page).textContent();
+  const box = await tutRing(page).boundingBox();
+  await page.mouse.click(box!.x + box!.width / 2, box!.y + box!.height / 2);
+  await expect(tutText(page)).not.toHaveText(text!);
+}
+
+/** Tutorial steps 1–2: tap the ringed tile, then its ringed twin. The first pair is gone afterwards. */
+async function tutorialFirstPair(page: Page, info: TestInfo): Promise<void> {
+  await expect(tutCard(page)).toBeVisible();
+  await expect(tutText(page)).toHaveText(/^Tippe auf diesen Stein/);
+  await expect(tutNext(page)).toBeHidden(); // a tap step has no Weiter
+  await expect(tutSkip(page)).toBeVisible();
+  await expect(tutRing(page)).toHaveCount(1);
+  await shot(page, info, 'tutorial-1-tap-first');
+  await tapRingedTile(page);
+  await expect(tutText(page)).toHaveText(/^Jetzt auf den gleichen Stein/);
+  await expect(tutRing(page)).toHaveCount(1);
+  await shot(page, info, 'tutorial-2-tap-twin');
+  await tapRingedTile(page);
+  await expect(hudCount(page)).toHaveText('34');
+  await expect(tutText(page)).toHaveText(/^Nur freie Steine/);
+}
+
+/** Weiter through the remaining steps to the last one, whose button is Los geht’s. */
+async function tutorialWeiterToEnd(page: Page): Promise<void> {
+  for (let guard = 0; guard < 10; guard++) {
+    await expect(tutNext(page)).toBeVisible();
+    const label = await tutNext(page).textContent();
+    await tutNext(page).click();
+    if (label === GO_LABEL) return;
+  }
+  throw new Error('the tutorial never reached its last step');
+}
+
+test('2 the tutorial completes without mistakes and saves tutorialDone', async ({ page }, info) => {
+  await openLevelOneFresh(page);
+  expect((await readSave(page)).tutorialDone).toBe(false);
+  await tutorialFirstPair(page, info);
+
+  // "What makes a tile free": a text step, then a covered tile and a boxed-in tile, each ringed.
+  await expect(tutRing(page)).toHaveCount(0);
+  await expect(tutNext(page)).toHaveText('Weiter');
+  await shot(page, info, 'tutorial-3-free');
+  await tutNext(page).click();
+  for (const text of [/^Hier liegt ein Stein darauf/, /^Hier ist links und rechts kein Platz/]) {
+    await expect(tutText(page)).toHaveText(text);
+    await expect(tutRing(page)).toHaveCount(1);
+    // Tapping the ringed tile shows the lesson (it wiggles, blocked) and takes nothing off the board.
+    const box = await tutRing(page).boundingBox();
+    await page.mouse.click(box!.x + box!.width / 2, box!.y + box!.height / 2);
+    await expect(hudCount(page)).toHaveText('34');
+    await shot(page, info, `tutorial-4-${text.source.includes('darauf') ? 'covered' : 'boxed-in'}`);
+    await tutNext(page).click();
+  }
+
+  // The three helpers: each step points at its button and only that button works.
+  await expect(tutText(page)).toHaveText(/^Findest du kein Paar\? Tipp/);
+  await expect(page.locator('.level .tut-point')).toHaveAttribute('aria-label', 'Tipp');
+  await hudBtn(page, 'Tipp').click();
+  await expect(page.locator('.level .hint-ring:not([hidden])')).toHaveCount(1);
+  await shot(page, info, 'tutorial-5-tipp');
+  await tutNext(page).click();
+  await expect(tutText(page)).toHaveText(/^Macht den letzten Zug rückgängig/);
+  await expect(page.locator('.level .tut-point')).toHaveAttribute('aria-label', 'Zurück');
+  await hudBtn(page, 'Zurück').click();
+  await expect(hudCount(page)).toHaveText('36');
+  await shot(page, info, 'tutorial-6-zurueck');
+  await tutNext(page).click();
+  await expect(tutText(page)).toHaveText(/^Mischt die Steine neu/);
+  await expect(page.locator('.level .tut-point')).toHaveAttribute('aria-label', 'Mischen');
+  await hudBtn(page, 'Mischen').click();
+  await expect(hudCount(page)).toHaveText('36');
+  await shot(page, info, 'tutorial-7-mischen');
+  await tutNext(page).click();
+
+  // The last step: Viel Spaß!; its button (Los geht’s) ends the tutorial.
+  await expect(tutText(page)).toHaveText('Viel Spaß!');
+  await expect(tutNext(page)).toHaveText(GO_LABEL);
+  await shot(page, info, 'tutorial-8-end');
+  await tutNext(page).click();
+  await expect(tutCard(page)).toHaveCount(0);
+  await expect(page.locator('.level .tut-point')).toHaveCount(0);
+  await expect(tutRing(page)).toHaveCount(0);
+  await expect.poll(async () => (await readSave(page)).tutorialDone).toBe(true);
+  await expect(hudCount(page)).toHaveText('36');
+
+  // A reload starts no tutorial: back to the level, the board is plain. (A negative check has to
+  // let the tutorial's own start delay of 460 ms pass, hence the dwell.)
+  await page.reload();
+  await candle(page, 1).locator('.cake-hit').click();
+  await page.waitForFunction(() => document.querySelector<HTMLElement>('.level')?.dataset.w !== undefined);
+  await page.waitForTimeout(900);
+  await expect(tutCard(page)).toHaveCount(0);
+  expect((await readSave(page)).tutorialDone).toBe(true);
+});
+
+test('2 Überspringen ends the tutorial at once and saves tutorialDone; helpers are blocked until then', async ({ page }, info) => {
+  await openLevelOneFresh(page);
+  await expect(tutCard(page)).toBeVisible();
+  // On a tap step the helpers are swallowed: nothing happens, the tutorial stays on its step.
+  const first = await tutText(page).textContent();
+  await hudBtn(page, 'Mischen').click();
+  await hudBtn(page, 'Tipp').click();
+  await expect(page.locator('.level .hint-ring:not([hidden])')).toHaveCount(0);
+  await expect(hudCount(page)).toHaveText('36');
+  await expect(tutText(page)).toHaveText(first!);
+  expect((await readSave(page)).tutorialDone).toBe(false);
+
+  await tutSkip(page).click();
+  await expect(tutCard(page)).toHaveCount(0);
+  await expect(tutRing(page)).toHaveCount(0);
+  await expect.poll(async () => (await readSave(page)).tutorialDone).toBe(true);
+  // The helpers work again.
+  await hudBtn(page, 'Tipp').click();
+  await expect(page.locator('.level .hint-ring:not([hidden])')).toHaveCount(1);
+  await shot(page, info, 'tutorial-skipped');
+});
+
+test('3 level 1 is won with Tipp twice and the ringed tiles; letter and map follow', async ({ page }, info) => {
+  await openLevelOneFresh(page);
+  await shot(page, info, '03-level-1-start');
+  // The first launch: the tutorial comes first (its own walkthrough is test 2).
+  await tutorialFirstPair(page, info);
+  await tutorialWeiterToEnd(page);
+  await expect(tutCard(page)).toHaveCount(0);
+  await expect.poll(async () => (await readSave(page)).tutorialDone).toBe(true);
+
+  let left = 34;
   while (left > 0) {
     await hudBtn(page, 'Tipp').click();
     await hudBtn(page, 'Tipp').click();
     const rings = page.locator('.level .hint-ring:not([hidden])');
     await expect(rings).toHaveCount(2);
     const boxes = [await rings.nth(0).boundingBox(), await rings.nth(1).boundingBox()];
-    if (left === 36) await shot(page, info, '03-level-1-hint-rings');
+    if (left === 34) await shot(page, info, '03-level-1-hint-rings');
     for (const b of boxes) await page.mouse.click(b!.x + b!.width / 2, b!.y + b!.height / 2);
     left -= 2;
     await expect(hudCount(page)).toHaveText(String(left));
     if (left === 18) await shot(page, info, '03-level-1-half');
   }
-  // The win is saved before the celebration ends.
+  // The tutorial flag survives the win's save.
   await expect.poll(async () => (await readSave(page)).won).toEqual([1]);
+  expect((await readSave(page)).tutorialDone).toBe(true);
   await shot(page, info, '03-level-1-won');
 
   const title = page.locator('.letter-title');
