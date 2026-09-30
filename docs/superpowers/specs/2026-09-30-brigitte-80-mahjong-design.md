@@ -3,7 +3,7 @@
 Date: 2026-09-30. Revision 2 (after the adversarial review `docs/reviews/2026-09-30-mahjong-design-adversary.md` and Jay's switch to six text clues). Status:
 - Sections 1–2 were approved by Jay in chat.
 - Sections 3–5 were delegated to the author ("give it your best shot"), with performance and visual polish named as the top priorities.
-- Revision 2 awaits Jay's approval.
+- Revision 2 was approved by Jay on 2026-09-30, including the 44 px tile hit-target exception, with the guidance "not too easy, but mechanics that keep her from getting stuck". That added the two-step Hint.
 
 Author: `@default` (Claude Opus 5.5).
 
@@ -136,7 +136,7 @@ tools/certify.ts      generates and checks each layout's certificate
 
 *Zurück* pops one entry and restores exactly that state. It is unlimited, back to the level start. Every board-changing action clears the selection and hint. The shuffle counter only ever increases: undoing a shuffle and shuffling again gives a new arrangement.
 
-**Hint.** Pulses one free matching pair. If none exists, it opens the stuck dialog.
+**Hint (two steps).** The first *Tipp* pulses **one** tile of a free matching pair, and she looks for its twin herself. Pressing *Tipp* again while that hint is showing also pulses the twin. A board-changing action or a new selection clears the hint. If no free matching pair exists, *Tipp* opens the stuck dialog. Difficulty comes from the boards; the helpers exist so she is never stuck, not to play the level for her.
 
 **Stuck dialog.** It opens once each time the board *becomes* stuck, after running animations settle. Title: "Keine passenden Steine mehr frei". Buttons: *Mischen* (primary), *Letztes Paar zurück* (hidden when history is empty), and a close ×. After closing, the HUD stays usable and *Tipp* reopens the dialog. Because it offers Undo directly, shuffle → undo → stuck can never trap her.
 
@@ -332,6 +332,7 @@ Vitest (`core/`, `levels/`, `progress/`, content):
 - **`isFree`:** covered from above (full and half-offset overlap); left-only, right-only, and both sides blocked; half-row vertical overlap.
 - **Reducer:**
   - Select, deselect, move the selection, mismatch, blocked tap, and a match removing the pair.
+  - Hint step 1 marks one tile of a free pair; step 2 adds its twin; a match or a new selection clears it.
   - Undo restoring a match exactly.
   - Two successive undos across a shuffle, restoring the exact pre-shuffle face map.
   - Shuffle keeping the face multiset.
