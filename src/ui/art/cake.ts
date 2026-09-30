@@ -220,6 +220,8 @@ export interface CakeArt {
   readonly candles: readonly CakeCandle[];
   /** The gold "80" topper; `is-active` once all six are won. */
   readonly topper: SVGGElement;
+  /** Tap target for the topper. */
+  readonly topperHit: SVGRectElement;
 }
 
 const CANDLE_COUNT = 6;
@@ -259,12 +261,12 @@ function candleMarkup(p: string, i: number): string {
     `<rect x="-26" y="-94" width="52" height="104"/>` +
     `<rect x="-26" y="${f(ey - 24)}" width="52" height="48"/>` +
     `</g>` +
-    `<g class="cake-num" transform="translate(0 ${f(ey)})">` +
+    `<g class="cake-num" aria-hidden="true" transform="translate(0 ${f(ey)})">` +
     `<circle r="12.5" fill="url(#${p}badge)" stroke="#d9b26f" stroke-width="1.6"/>` +
     `<text y="6" text-anchor="middle" font-size="17" font-weight="700" fill="#8e2f4f" style="font-family:var(--font-display,Georgia,serif)">${i + 1}</text>` +
     `</g>` +
     `<g class="cake-env" transform="translate(0 ${f(ey)})">` +
-    `<g class="cake-env-icon">` +
+    `<g class="cake-env-icon" aria-hidden="true">` +
     `<rect x="-20" y="-14" width="40" height="28" rx="3.5" fill="url(#${p}paper)" stroke="#d9b26f" stroke-width="1.5"/>` +
     `<path d="M-20-14L0 3L20-14" fill="#f5e2c6" stroke="#d9b26f" stroke-width="1.3" stroke-linejoin="round"/>` +
     `<path d="M-20 14L-6 1.5M20 14L6 1.5" stroke="#d9b26f" stroke-width="1" fill="none"/>` +
@@ -438,7 +440,8 @@ function buildCakeArt(mini: boolean): CakeArt {
 
   const markup = defs + `<g class="cake-sparkles">${sparkles}</g>` + plate + bot + mid + top + topper + candles;
   const svg = svgRoot('0 0 600 360', markup, mini ? 'cake cake--mini' : 'cake');
-  svg.setAttribute('role', 'img');
+  // The map cake holds real controls, so it is a labelled group; the closing cake is a picture.
+  svg.setAttribute('role', mini ? 'img' : 'group');
   svg.setAttribute('aria-label', T.cakeLabel);
 
   const q = <E extends Element>(root: ParentNode, sel: string): E => root.querySelector<E>(sel)!;
@@ -453,7 +456,7 @@ function buildCakeArt(mini: boolean): CakeArt {
     }),
   );
   const topperEl = q<SVGGElement>(svg, '.cake-topper');
-  const art: CakeArt = { svg, candles: candleHandles, topper: topperEl };
+  const art: CakeArt = { svg, candles: candleHandles, topper: topperEl, topperHit: q<SVGRectElement>(topperEl, '.cake-topper-hit') };
   if (mini) {
     for (const c of candleHandles) setCandleState(c, 'won');
     setTopperActive(art, true);

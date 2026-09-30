@@ -3,7 +3,7 @@ import { levels } from '../levels/levels';
 import { currentLevel } from '../progress/save';
 import type { SaveV1 } from '../progress/save';
 import { buildBalloons, buildCake, lightCandle, pauseOnHidden, setCandleState, setTopperActive } from './art/cake';
-import type { CakeArt } from './art/cake';
+import type { CakeArt, CakeCandle } from './art/cake';
 import { atlasDpr, prebakeAtlas } from './atlas';
 import { measureFrame } from './frame';
 import { createFx } from './fx';
@@ -13,6 +13,10 @@ import './screens.css';
 const T = {
   help: 'Hilfe und Willkommen',
   rotate: 'Bitte das Handy drehen',
+  levelPlay: (n: number): string => `Level ${n} spielen`,
+  levelLocked: (n: number): string => `Level ${n} noch gesperrt`,
+  letter: (n: number): string => `Hinweis ${n} lesen`,
+  finale: 'Zum Abschluss',
 };
 
 const PHONE_ICON =
@@ -45,6 +49,33 @@ export interface MapOpts {
   onHelp(): void;
 }
 
+/** Gives an SVG hit shape a button's accessible face; `enabled` decides whether it is a tab stop. */
+function exposeButton(el: Element, label: string, enabled: boolean): void {
+  el.setAttribute('role', 'button');
+  el.setAttribute('aria-label', label);
+  if (enabled) {
+    el.setAttribute('tabindex', '0');
+    el.removeAttribute('aria-disabled');
+  } else {
+    el.removeAttribute('tabindex');
+    el.setAttribute('aria-disabled', 'true');
+  }
+}
+
+function hideButton(el: Element): void {
+  for (const a of ['role', 'aria-label', 'tabindex', 'aria-disabled']) el.removeAttribute(a);
+}
+
+/** Enter and Space do what a click does. */
+function onActivateKey(el: Element, fn: () => void): void {
+  el.addEventListener('keydown', (e) => {
+    const k = e as KeyboardEvent;
+    if ((k.key !== 'Enter' && k.key !== ' ') || k.repeat) return;
+    k.preventDefault();
+    fn();
+  });
+}
+
 /** Mounts the cake map; returns the unmount function. */
 export function mountMap(root: HTMLElement, opts: MapOpts): () => void {
   const { save, lit } = opts;
@@ -54,6 +85,21 @@ export function mountMap(root: HTMLElement, opts: MapOpts): () => void {
   const art: CakeArt = buildCake();
   const current = currentLevel(save);
   const won = (id: number): boolean => save.won.includes(id);
+
+  // The hit shapes are the controls: only a current or won candle is a tab stop, only a won candle
+  // shows its letter, only a full cake shows the topper. Re-run after every state change.
+  const syncCandle = (candle: CakeCandle, id: number): void => {
+    const state = candle.slot.classList.contains('is-won') ? 'won' : candle.slot.classList.contains('is-current') ? 'current' : 'locked';
+    if (state === 'locked') exposeButton(candle.hit, T.levelLocked(id), false);
+    else exposeButton(candle.hit, T.levelPlay(id), true);
+    if (state === 'won') exposeButton(candle.envelopeHit, T.letter(id), true);
+    else hideButton(candle.envelopeHit);
+  };
+  const showTopper = (active: boolean): void => {
+    setTopperActive(art, active);
+    if (active) exposeButton(art.topperHit, T.finale, true);
+    else hideButton(art.topperHit);
+  };
 
   // The candle that plays the lighting moment starts as the unlit one it just was; the candle that
   // this win unlocks waits (dim) until the flame has popped.
@@ -66,8 +112,9 @@ export function mountMap(root: HTMLElement, opts: MapOpts): () => void {
       else if (id === holdFor + 1 && state === 'current') state = 'locked';
     }
     setCandleState(candle, state);
+    syncCandle(candle, id);
   });
-  setTopperActive(art, save.won.length === art.candles.length && holdFor === undefined);
+  showTopper(save.won.length === art.candles.length && holdFor === undefined);
 
   const stage = document.createElement('div');
   stage.className = 'map-stage';
@@ -95,21 +142,27 @@ export function mountMap(root: HTMLElement, opts: MapOpts): () => void {
   const fx = createFx(screen);
   const offPause = pauseOnHidden(screen);
 
-  // Taps: a candle opens its level only while it is the current one or already won.
+  // Taps and keys: a candle opens its level only while it is the current one or already won.
   art.candles.forEach((candle, i) => {
     const id = i + 1;
-    candle.hit.addEventListener('click', () => {
+    const openLevel = (): void => {
       if (!candle.slot.classList.contains('is-current') && !candle.slot.classList.contains('is-won')) return;
       performance.mark('level-tap');
       opts.onLevel(id);
-    });
-    candle.envelopeHit.addEventListener('click', () => {
+    };
+    const openLetter = (): void => {
       if (candle.slot.classList.contains('is-won')) opts.onEnvelope(id);
-    });
+    };
+    candle.hit.addEventListener('click', openLevel);
+    onActivateKey(candle.hit, openLevel);
+    candle.envelopeHit.addEventListener('click', openLetter);
+    onActivateKey(candle.envelopeHit, openLetter);
   });
-  art.topper.addEventListener('click', () => {
+  const openFinale = (): void => {
     if (art.topper.classList.contains('is-active')) opts.onTopper();
-  });
+  };
+  art.topper.addEventListener('click', openFinale);
+  onActivateKey(art.topperHit, openFinale);
   help.addEventListener('click', () => opts.onHelp());
 
   const timers: number[] = [];
@@ -131,6 +184,7 @@ export function mountMap(root: HTMLElement, opts: MapOpts): () => void {
     const candle = art.candles[holdFor - 1]!;
     later(() => {
       lightCandle(candle);
+      syncCandle(candle, holdFor);
       // One read for the candle's place on screen; the sparkles then burst around the flame.
       const r = candle.flame.getBoundingClientRect();
       const x = r.left + r.width / 2;
@@ -140,8 +194,11 @@ export function mountMap(root: HTMLElement, opts: MapOpts): () => void {
       void fx.idle().then(prebake);
       later(() => {
         const next = art.candles[holdFor];
-        if (next !== undefined && holdFor + 1 === current) setCandleState(next, 'current');
-        setTopperActive(art, save.won.length === art.candles.length);
+        if (next !== undefined && holdFor + 1 === current) {
+          setCandleState(next, 'current');
+          syncCandle(next, holdFor + 1);
+        }
+        showTopper(save.won.length === art.candles.length);
       }, NEXT_PULSE_DELAY_MS);
     }, LIT_DELAY_MS);
   } else {

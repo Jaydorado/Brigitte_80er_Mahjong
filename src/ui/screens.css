@@ -509,6 +509,26 @@
   pointer-events: none;
 }
 
+/* Keyboard focus: a ring on the hit shape itself (no layout change); a touch or mouse tap draws none. */
+.cake .cake-hit:focus,
+.cake .cake-env-hit:focus,
+.cake .cake-topper-hit:focus {
+  outline: none;
+}
+
+.cake .cake-hit:focus-visible rect,
+.cake .cake-env-hit:focus-visible,
+.cake .cake-topper-hit:focus-visible {
+  stroke: var(--gold-light);
+  stroke-width: 3;
+  filter: drop-shadow(0 0 2px var(--plum));
+}
+
+/* A won candle's badge area is the envelope's: its own ring stays on the candle body. */
+.cake .cake-slot.is-won .cake-hit:focus-visible rect:last-child {
+  stroke: none;
+}
+
 /* candle states */
 .cake-dim {
   opacity: 0;
