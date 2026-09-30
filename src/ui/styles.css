@@ -1,0 +1,27 @@
+/* Palette aus dem Design. Alle Farben nur hier definieren. */
+:root {
+  --cream: #fff8ee;
+  --gold: #d9b26f;
+  --rose: #e89aa8;
+  --berry: #8e2f4f;
+  --plum: #3a1f2b;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+}
+
+body {
+  background: var(--cream);
+  color: var(--plum);
+  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+}
+
+#app h1 {
+  margin: 0;
+  padding: 16px;
+  color: var(--berry);
+}
