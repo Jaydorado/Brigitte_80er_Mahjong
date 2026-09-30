@@ -324,12 +324,22 @@
 .letter-env-flap {
   height: 78px;
   transform-origin: 50% 0;
-  background: linear-gradient(180deg, #f1a8b6 0%, #d77f92 100%);
-  clip-path: polygon(0 0, 100% 0, 50% 100%);
   z-index: 5;
 }
 
-.letter-env-flap::after {
+/* Two static faces; the flap animates only its transform and the back face shows while it is turned over. */
+.letter-env-flap-face {
+  position: absolute;
+  inset: 0;
+  clip-path: polygon(0 0, 100% 0, 50% 100%);
+  backface-visibility: hidden;
+}
+
+.letter-env-flap-front {
+  background: linear-gradient(180deg, #f1a8b6 0%, #d77f92 100%);
+}
+
+.letter-env-flap-front::after {
   content: '';
   position: absolute;
   left: 50%;
@@ -341,14 +351,38 @@
   background: radial-gradient(circle at 35% 30%, #fbeab0, #d9b26f 60%, #a97b2c);
 }
 
-.letter-envelope.is-opening .letter-env-flap::after {
+.letter-env-flap-back {
+  display: none;
+  background: linear-gradient(0deg, #b04a68 0%, #8e2f4f 100%);
+  transform: rotateX(180deg);
+}
+
+.letter-envelope.is-opening .letter-env-flap {
+  transform-style: preserve-3d;
+}
+
+.letter-envelope.is-opening .letter-env-flap-back {
+  display: block;
+}
+
+.letter-envelope.is-opening .letter-env-flap-front::after {
   display: none;
 }
 
+/* Open and at rest: flat, turned over behind the card. */
 .letter-envelope.is-open .letter-env-flap {
   transform: scaleY(-1);
-  background: linear-gradient(0deg, #b04a68 0%, #8e2f4f 100%);
+  transform-style: flat;
   z-index: 1;
+}
+
+.letter-envelope.is-open .letter-env-flap-front {
+  display: none;
+}
+
+.letter-envelope.is-open .letter-env-flap-back {
+  display: block;
+  transform: none;
 }
 
 .letter-card {
@@ -421,10 +455,12 @@
   padding: 0 0 max(12px, env(safe-area-inset-bottom));
   min-height: 76px;
   opacity: 0;
+  pointer-events: none;
 }
 
 .letter-next.is-shown {
   opacity: 1;
+  pointer-events: auto;
 }
 
 /* ───────── cake (map and closing) ───────── */
@@ -504,9 +540,18 @@
 .cake-halo,
 .cake-sparkle {
   transform-origin: 50% 50%;
+}
+
+.cake-sparkle {
   opacity: 0.15;
   animation: cake-twinkle 2.8s ease-in-out infinite;
   animation-delay: var(--d, 0s);
+}
+
+/* Decoration never takes a tap: the candle's hit area underneath does. */
+.cake-num,
+.cake-env-icon {
+  pointer-events: none;
 }
 
 .cake-slot.is-current .cake-body {

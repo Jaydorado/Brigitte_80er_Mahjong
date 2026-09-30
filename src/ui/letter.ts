@@ -45,6 +45,11 @@ export function mountLetter(root: HTMLElement, opts: LetterOpts): () => void {
   front.className = 'letter-env-front';
   const flap = document.createElement('div');
   flap.className = 'letter-env-flap';
+  for (const side of ['front', 'back']) {
+    const face = document.createElement('div');
+    face.className = `letter-env-flap-face letter-env-flap-${side}`;
+    flap.append(face);
+  }
   const pieces = [back, front, flap];
 
   const card = document.createElement('article');
@@ -77,6 +82,7 @@ export function mountLetter(root: HTMLElement, opts: LetterOpts): () => void {
 
   let alive = true;
   let clicked = false;
+  button.disabled = true; // inert until the clue is shown, so a stray tap can never skip it
   button.addEventListener('click', () => {
     if (clicked) return;
     clicked = true;
@@ -101,6 +107,7 @@ export function mountLetter(root: HTMLElement, opts: LetterOpts): () => void {
     card.classList.add('is-shown');
     next.classList.add('is-shown');
     stage.classList.add('is-revealed');
+    button.disabled = false;
   };
 
   const sequence = async (): Promise<void> => {
@@ -108,9 +115,7 @@ export function mountLetter(root: HTMLElement, opts: LetterOpts): () => void {
       envelope.classList.add('is-gone');
       await play(card, [{ opacity: 0 }, { opacity: 1 }], { duration: 450 });
       if (!alive) return;
-      card.classList.add('is-shown');
-      next.classList.add('is-shown');
-      stage.classList.add('is-revealed');
+      reveal();
       return;
     }
 
@@ -126,18 +131,9 @@ export function mountLetter(root: HTMLElement, opts: LetterOpts): () => void {
     );
     if (!alive) return;
 
-    // 2. the flap opens: rotateX on the flap only, and only while it animates
+    // 2. the flap turns over: rotateX on the flap only, and only while it animates
     envelope.classList.add('is-opening');
-    await play(
-      flap,
-      [
-        { transform: FLAP_OUT, background: 'linear-gradient(180deg, #f1a8b6 0%, #d77f92 100%)', offset: 0 },
-        { transform: 'perspective(720px) rotateX(89deg)', background: 'linear-gradient(180deg, #f1a8b6 0%, #d77f92 100%)', offset: 0.49 },
-        { transform: 'perspective(720px) rotateX(91deg)', background: 'linear-gradient(0deg, #b04a68 0%, #8e2f4f 100%)', offset: 0.51 },
-        { transform: FLAP_IN, background: 'linear-gradient(0deg, #b04a68 0%, #8e2f4f 100%)', offset: 1 },
-      ],
-      { duration: 620, easing: 'ease-in-out' },
-    );
+    await play(flap, [{ transform: FLAP_OUT }, { transform: FLAP_IN }], { duration: 620, easing: 'ease-in-out' });
     if (!alive) return;
     envelope.classList.add('is-open'); // same picture as rotateX(180deg), now flat and behind the card
 
