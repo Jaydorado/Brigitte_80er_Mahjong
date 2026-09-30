@@ -22,6 +22,13 @@ export const MAX_PARTICLES = 300;
 const DPR_MAX = 2;
 /** A frame advances the effect clock by at most this much, so a stalled tab resumes where it paused. */
 const MAX_STEP_MS = 50;
+/**
+ * Confetti still in the air when `confetti(ms)` resolves fades out within this long, so a screen
+ * can wait for it to land before leaving.
+ */
+export const CONFETTI_TAIL_MS = 900;
+/** Confetti fades over its last this-many ms. */
+const CONFETTI_FADE_MS = 450;
 const TAU = Math.PI * 2;
 
 // Particle kinds.
@@ -80,6 +87,8 @@ export class Particle {
   glow = false;
   /** Sparks and rockets draw a streak this many seconds of velocity long. */
   trail = 0;
+  /** > 0: fade out linearly over the last this-many ms of life (confetti); 0: sparkle-style fade. */
+  fade = 0;
   /** A rocket's burst pattern. */
   burst = 0;
 }
@@ -176,16 +185,18 @@ export class FxEngine {
 
   /**
    * Party-popper confetti: a volley from both bottom corners, a smaller second volley near halfway,
-   * and a rain of paper, ribbons, hearts and stars from the top for `ms`. Resolves after `ms`.
+   * and a rain of paper, ribbons, hearts and stars from the top over most of `ms`. Resolves after
+   * `ms`; every piece has landed or faded by CONFETTI_TAIL_MS later.
    */
   confetti(ms: number): Promise<void> {
     const done = new Promise<void>((resolve) => this.waits.push({ at: this.t + ms, resolve }));
-    this.volley(50);
-    if (ms >= 1000) this.schedule(this.t + ms * 0.45, () => (this.volley(30), -1));
-    const end = this.t + ms;
-    const every = ms / 120;
+    const deadline = this.t + ms + CONFETTI_TAIL_MS;
+    this.volley(50, deadline);
+    if (ms >= 1000) this.schedule(this.t + ms * 0.45, () => (this.volley(30, deadline), -1));
+    const end = this.t + ms * 0.75;
+    const every = (ms * 0.75) / 110;
     this.schedule(this.t, (at) => {
-      this.rainDrop();
+      this.rainDrop(deadline);
       const next = at + every;
       return next >= end ? -1 : next;
     });
@@ -318,6 +329,7 @@ export class FxEngine {
     p.twinkle = 0;
     p.glow = false;
     p.trail = 0;
+    p.fade = 0;
     p.burst = 0;
     return p;
   }
@@ -329,16 +341,21 @@ export class FxEngine {
     this.pool[last] = p;
   }
 
-  /** One piece of confetti: paper, ribbon, heart, star or dot, in gold, rose, berry or (rarely) cream. */
-  private paper(x: number, y: number, vx: number, vy: number): void {
+  /**
+   * One piece of confetti: paper, ribbon, heart, star or dot, in gold, rose, berry or (rarely) cream.
+   * It dies by `deadline` (effect clock), fading over its last CONFETTI_FADE_MS.
+   */
+  private paper(x: number, y: number, vx: number, vy: number, deadline: number): void {
     const { u, rand } = this;
     const r = rand();
     const kind = r < 0.4 ? PAPER : r < 0.6 ? RIBBON : r < 0.73 ? HEART : r < 0.86 ? STAR5 : DOT;
     const c = rand();
     const color = c < 0.36 ? GOLD : c < 0.66 ? ROSE : c < 0.9 ? BERRY : CREAM;
     const size = (kind === DOT ? 3.2 + rand() * 1.2 : kind === RIBBON ? 5.4 + rand() * 2.4 : 6.6 + rand() * 3.6) * u;
-    const p = this.spawn(kind, color, x, y, vx, vy, size, 4200 + rand() * 1800);
+    const life = Math.min(4200 + rand() * 1800, deadline - this.t);
+    const p = this.spawn(kind, color, x, y, vx, vy, size, life);
     if (!p) return;
+    p.fade = CONFETTI_FADE_MS;
     p.drag = 2.4;
     p.g = 380 * u;
     p.vrot = (rand() - 0.5) * 12;
@@ -347,19 +364,19 @@ export class FxEngine {
     p.swayF = 2 + rand() * 3;
   }
 
-  private volley(perSide: number): void {
+  private volley(perSide: number, deadline: number): void {
     const { w, h, rand } = this;
     for (let i = 0; i < perSide * 2; i++) {
       const left = i % 2 === 0;
       const a = (-90 + (left ? 1 : -1) * (14 + rand() * 30)) * (Math.PI / 180);
       const sp = h * (1.7 + rand() * 1.6);
-      this.paper(left ? -8 : w + 8, h + 8, Math.cos(a) * sp, Math.sin(a) * sp);
+      this.paper(left ? -8 : w + 8, h + 8, Math.cos(a) * sp, Math.sin(a) * sp, deadline);
     }
   }
 
-  private rainDrop(): void {
+  private rainDrop(deadline: number): void {
     const { u, rand } = this;
-    this.paper(rand() * this.w, -14, (rand() - 0.5) * 60 * u, (40 + rand() * 110) * u);
+    this.paper(rand() * this.w, -14, (rand() - 0.5) * 60 * u, (40 + rand() * 110) * u, deadline);
   }
 
   private launch(pattern: number): void {
@@ -581,7 +598,7 @@ function drawParticles(ctx: CanvasRenderingContext2D, e: FxEngine, d: number, ar
         break;
       }
       case DOT: {
-        const a = p.life > 2000 ? (f < 0.85 ? 1 : (1 - f) / 0.15) : 1 - f * f;
+        const a = p.fade > 0 ? Math.min(1, (p.life - p.age) / p.fade) : 1 - f * f;
         const s = p.size * d;
         ctx.setTransform(s, 0, 0, s, p.x * d, p.y * d);
         ctx.globalAlpha = a;
@@ -592,7 +609,7 @@ function drawParticles(ctx: CanvasRenderingContext2D, e: FxEngine, d: number, ar
       default: {
         // Confetti turning over in the air: the drawn height follows cos(flip), the back a shade dimmer.
         const fy = Math.cos(p.flip);
-        let a = f < 0.85 ? 1 : (1 - f) / 0.15;
+        let a = Math.min(1, (p.life - p.age) / p.fade);
         if (fy < 0) a *= 0.72;
         const s = p.size * d;
         const c = Math.cos(p.rot) * s;

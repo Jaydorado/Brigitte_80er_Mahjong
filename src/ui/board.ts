@@ -12,6 +12,10 @@ export interface BoardView {
   el: HTMLElement;
   render(s: GameState): void; // sync DOM to state without animation
   tileEl(slot: number): HTMLElement | undefined;
+  /** A slot's resting offset in the board (CSS px, device-px snapped): tiles sit at translate(x, y). */
+  pos(slot: number): { x: number; y: number };
+  /** A slot's face centre in viewport CSS px (the board rect is read at most once per fit). */
+  center(slot: number): { x: number; y: number };
   fit(area: { w: number; h: number }): void;
   onTap(cb: (slot: number) => void): void;
   destroy(): void;
@@ -145,6 +149,11 @@ export function createBoard(layout: Layout, atlas: Atlas, w: number): BoardView 
       hintRings.forEach((r, k) => place(r, hint[k] ?? null));
     },
     tileEl: (slot) => tiles[slot],
+    pos: (slot) => pos[slot],
+    center(slot) {
+      rect ??= el.getBoundingClientRect();
+      return { x: rect.left + pos[slot].x + w / 2, y: rect.top + pos[slot].y + faceH / 2 };
+    },
     fit(area) {
       const x = snap(Math.max(0, (area.w - geo.width) / 2));
       const y = snap(Math.max(0, (area.h - geo.height) / 2));

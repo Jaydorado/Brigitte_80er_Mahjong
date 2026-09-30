@@ -128,9 +128,10 @@ function openDialog(root: HTMLElement, cls: string, body: string, on: Record<str
 
 /**
  * "Keine passenden Steine mehr frei": *Mischen* (primary), *Letztes Paar zurück* (only when there is
- * something to undo) and ×. Returns close.
+ * something to undo) and ×. Exactly one callback runs when it closes by the player's hand (×, Escape
+ * and a backdrop tap are `onDismiss`). Returns close, which runs none.
  */
-export function showStuck(root: HTMLElement, opts: { canUndo: boolean; onShuffle(): void; onUndo(): void }): () => void {
+export function showStuck(root: HTMLElement, opts: { canUndo: boolean; onShuffle(): void; onUndo(): void; onDismiss(): void }): () => void {
   const undo = opts.canUndo
     ? `<button type="button" class="dlg-btn" data-act="undo">${UNDO_ICON}<span>${UNDO_LABEL}</span></button>`
     : '';
@@ -146,7 +147,7 @@ export function showStuck(root: HTMLElement, opts: { canUndo: boolean; onShuffle
       `</div></div>` +
       `<button type="button" class="dlg-close" data-act="dismiss" aria-label="${CLOSE_LABEL}">×</button>`,
     { shuffle: () => opts.onShuffle(), undo: () => opts.onUndo() },
-    () => {},
+    () => opts.onDismiss(),
   );
 }
 

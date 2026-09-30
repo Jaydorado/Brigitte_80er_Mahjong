@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createFx, FxEngine, MAX_PARTICLES } from './fx';
+import { CONFETTI_TAIL_MS, createFx, FxEngine, MAX_PARTICLES } from './fx';
 
 /** Deterministic stand-in for Math.random. */
 function lcg(seed: number): () => number {
@@ -75,6 +75,21 @@ describe('FxEngine', () => {
     expect(done).toBe(true);
   });
 
+  it.each([1, 2, 3])('seed %i: every confetti piece is gone within CONFETTI_TAIL_MS after the promise resolves', async (seed) => {
+    const e = engine(seed);
+    let done = false;
+    void e.confetti(1500).then(() => (done = true));
+    while (!done) {
+      e.step(16);
+      await flush();
+    }
+    expect(e.live).toBeGreaterThan(0); // still falling when the promise resolves...
+    for (let t = 0; t < CONFETTI_TAIL_MS; t += 16) e.step(16);
+    expect(e.live).toBe(0); // ...and landed or faded by the tail's end
+    expect(e.active).toBe(false);
+    expect(CONFETTI_TAIL_MS).toBeLessThanOrEqual(1000);
+  });
+
   it('long frames count at most 50 ms each, so a stalled tab does not skip the show', async () => {
     const e = engine();
     let done = false;
@@ -133,7 +148,7 @@ describe('createFx frame loop', () => {
 
     const fx = createFx({ append() {} } as unknown as HTMLElement);
     let done = false;
-    void fx.confetti(1_000_000).then(() => (done = true)); // rain drops thousands of ms apart
+    void fx.confetti(10_000_000).then(() => (done = true)); // rain drops about a minute apart
     expect(pump(7000)).toBeGreaterThan(100); // the opening volley is drawn every frame until it lands
     // The volley has landed; the next drop is seconds away: no frames meanwhile, only a timer.
     const idle = pump(1000);
@@ -142,7 +157,7 @@ describe('createFx frame loop', () => {
     expect(canvas.hidden).toBe(true);
     expect(vi.getTimerCount()).toBe(1);
     // The timer wakes the loop for the next drop.
-    expect(pump(8000)).toBeGreaterThan(0);
+    expect(pump(62000)).toBeGreaterThan(0);
     expect(done).toBe(false);
     fx.destroy();
     expect(vi.getTimerCount()).toBe(0);

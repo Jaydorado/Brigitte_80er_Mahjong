@@ -1,23 +1,41 @@
 /**
  * The level screen: a static festive backdrop, the clue paper under the board, the board and the HUD.
- * Taps go through the reducer and the board re-syncs without animation. A resize re-fits the board;
- * a new tile width or DPR re-bakes the atlas, swaps it in, and releases the old one.
+ * Taps go through the reducer; the board animator renders and animates each result. A resize re-fits
+ * the board; a new tile width or DPR re-bakes the atlas, swaps it in, and releases the old one.
+ *
+ * Lifecycle: the screen pushes one history entry, so the phone's Back asks before leaving a level in
+ * progress, like Zurück in the HUD. A win is saved at once, then the last match lands, confetti plays
+ * and `onWon` follows. Unmounting mid-way stops every animation, effect and pending step.
  */
 import { clues } from '../content';
 import { newGame, reduce, status, type Action } from '../core/game';
 import { layouts } from '../core/layouts';
 import { hashSeed, mulberry32 } from '../core/rng';
 import { attemptSeed, type LevelDef } from '../levels/levels';
-import { nextAttempt, type SaveV1 } from '../progress/save';
+import { markWon, nextAttempt, type SaveV1 } from '../progress/save';
+import { BoardAnimator } from './anim';
 import { atlasDpr, bakeAtlas, releaseAtlas, type Atlas } from './atlas';
 import { createBoard, type BoardView } from './board';
 import { createCluePaper } from './cluePaper';
+import { confirmLeave, showStuck } from './dialogs';
+import { CONFETTI_TAIL_MS, createFx } from './fx';
 import { measureFrame, type Frame } from './frame';
 import { createHud } from './hud';
 
 export interface LevelDeps { save: SaveV1; persist(s: SaveV1): void; onExit(): void; onWon(levelId: number): void }
 
 const ROTATE_TEXT = 'Bitte das Handy drehen';
+/** Long enough for the longest board animation (a relocating shuffle, 450 ms) to land. */
+const SETTLE_MS = 460;
+const CONFETTI_MS = 1500;
+/** Marks the history entry a level screen pushes. */
+const HISTORY_KEY = 'mahjong80Level';
+
+function wait(ms: number): Promise<void> {
+  const { promise, resolve } = Promise.withResolvers<void>();
+  setTimeout(resolve, ms);
+  return promise;
+}
 
 /** Per level: sky gradient top → middle → bottom, then the bunting's flag colours. */
 const THEMES: readonly { sky: readonly [string, string, string]; flags: readonly string[]; string: string }[] = [
@@ -123,6 +141,7 @@ export function mountLevel(root: HTMLElement, level: LevelDef, deps: LevelDeps):
   const { save, attempt } = nextAttempt(deps.save, level.id);
   deps.persist(save);
   let state = newGame(layout, level.faces, attemptSeed(level.id, attempt));
+  const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
 
   const screen = document.createElement('div');
   screen.className = 'level';
@@ -133,7 +152,7 @@ export function mountLevel(root: HTMLElement, level: LevelDef, deps: LevelDeps):
   const area = document.createElement('div');
   area.className = 'level-area';
   const hud = createHud({
-    back: () => deps.onExit(),
+    back: () => requestLeave(),
     hint: () => dispatch({ type: 'hint' }),
     undo: () => dispatch({ type: 'undo' }),
     shuffle: () => dispatch({ type: 'shuffle' }),
@@ -149,24 +168,112 @@ export function mountLevel(root: HTMLElement, level: LevelDef, deps: LevelDeps):
   hud.update(state);
 
   const paper = createCluePaper(clues[level.clueIndex]);
+  const fx = createFx(screen);
   let alive = true;
+  /** Bumped on unmount: every delayed step (stuck dialog, win sequence) checks it before acting. */
+  let gen = 0;
   let won = false;
+  let leaving = false;
+  let confirming = false;
+  let closeStuck: (() => void) | null = null;
+  let stuckTimer = 0;
   let board: BoardView | null = null;
+  let animator: BoardAnimator | null = null;
   let atlas: Atlas | null = null;
   let bakeGen = 0;
   let requested = { w: 0, dpr: 0 };
   let frame: Frame;
 
   function dispatch(a: Action): void {
-    if (!alive) return;
+    if (!alive || won || leaving) return;
+    const prev = state;
     state = reduce(state, a);
-    board?.render(state);
+    if (animator) animator.play(prev, state);
     hud.update(state);
-    if (!won && status(state) === 'won') {
+    const now = status(state);
+    if (now === 'won') {
       won = true;
-      deps.onWon(level.id);
+      void celebrate();
+    } else if (now === 'stuck' && (status(prev) !== 'stuck' || state.event.type === 'stuckHint')) {
+      offerStuck();
     }
   }
+
+  /** The stuck dialog, once the move that got here has landed (at most one open). */
+  function offerStuck(): void {
+    clearTimeout(stuckTimer);
+    const g = gen;
+    stuckTimer = window.setTimeout(() => {
+      stuckTimer = 0;
+      if (g !== gen || won || leaving || confirming || closeStuck || status(state) !== 'stuck') return;
+      const closed = (then?: Action): void => {
+        closeStuck = null;
+        if (then) dispatch(then);
+      };
+      closeStuck = showStuck(screen, {
+        canUndo: state.history.length > 0,
+        onShuffle: () => closed({ type: 'shuffle' }),
+        onUndo: () => closed({ type: 'undo' }),
+        onDismiss: () => closed(),
+      });
+    }, SETTLE_MS);
+  }
+
+  /** Saved at once; then the last match lands, confetti plays and its last pieces fall; then `onWon`. */
+  async function celebrate(): Promise<void> {
+    const g = gen;
+    deps.persist(markWon(save, level.id));
+    await wait(SETTLE_MS);
+    if (g !== gen) return;
+    await fx.confetti(CONFETTI_MS);
+    if (g !== gen) return;
+    if (!reducedMotion) await wait(CONFETTI_TAIL_MS);
+    if (g !== gen) return;
+    deps.onWon(level.id);
+  }
+
+  /** Zurück in the HUD, or the phone's Back: a level in progress asks first. */
+  function requestLeave(): void {
+    if (!alive || won || leaving || confirming) return;
+    if (state.history.length === 0) {
+      leave();
+      return;
+    }
+    confirming = true;
+    closeStuck?.();
+    closeStuck = null;
+    const g = gen;
+    void confirmLeave(screen).then((yes) => {
+      if (g !== gen) return;
+      confirming = false;
+      if (yes) leave();
+    });
+  }
+
+  /** Leaves through our history entry, so the next Back does not land on it again. */
+  function leave(): void {
+    leaving = true;
+    if ((history.state as Record<string, unknown> | null)?.[HISTORY_KEY] === level.id) history.back();
+    else deps.onExit();
+  }
+
+  const onPopState = (): void => {
+    if (!alive) return;
+    if (leaving) {
+      deps.onExit();
+      return;
+    }
+    if (won) return; // the win is saved; its letter follows in a moment
+    if (state.history.length === 0 && !confirming) {
+      leaving = true;
+      deps.onExit();
+      return;
+    }
+    history.pushState({ [HISTORY_KEY]: level.id }, ''); // stay on the level while asking
+    requestLeave();
+  };
+  history.pushState({ [HISTORY_KEY]: level.id }, '');
+  window.addEventListener('popstate', onPopState);
 
   function applyFrame(): void {
     frame = measureFrame(screen, layout);
@@ -178,7 +285,7 @@ export function mountLevel(root: HTMLElement, level: LevelDef, deps: LevelDeps):
   }
 
   async function build(): Promise<void> {
-    const gen = ++bakeGen;
+    const bake = ++bakeGen;
     const w = frame.w;
     const dpr = atlasDpr();
     requested = { w, dpr };
@@ -186,14 +293,15 @@ export function mountLevel(root: HTMLElement, level: LevelDef, deps: LevelDeps):
     try {
       next = await bakeAtlas(level.faces, w, dpr);
     } catch (err) {
-      if (gen === bakeGen) requested = { w: 0, dpr: 0 }; // let the next resize retry
+      if (bake === bakeGen) requested = { w: 0, dpr: 0 }; // let the next resize retry
       console.error('[level] atlas bake failed', err);
       return;
     }
-    if (!alive || gen !== bakeGen) {
+    if (!alive || bake !== bakeGen) {
       releaseAtlas(next);
       return;
     }
+    animator?.finishAll(); // the old board lands in the current state before the swap
     const nb = createBoard(layout, next, w);
     nb.onTap((slot) => dispatch({ type: 'tap', slot }));
     paper.place(layout, w);
@@ -204,6 +312,7 @@ export function mountLevel(root: HTMLElement, level: LevelDef, deps: LevelDeps):
     const first = old === null; // the first board on screen, whichever bake produced it
     const oldAtlas = atlas;
     board = nb;
+    animator = new BoardAnimator(nb, fx, reducedMotion);
     atlas = next;
     area.replaceChildren(nb.el);
     old?.destroy();
@@ -219,7 +328,7 @@ export function mountLevel(root: HTMLElement, level: LevelDef, deps: LevelDeps):
       }
     });
     const px = await paper.fitText();
-    if (alive && gen === bakeGen) console.info(`[level ${level.id}] clue ${px}px`);
+    if (alive && bake === bakeGen) console.info(`[level ${level.id}] clue ${px}px`);
   }
 
   let resizeRaf = 0;
@@ -250,10 +359,18 @@ export function mountLevel(root: HTMLElement, level: LevelDef, deps: LevelDeps):
   return () => {
     if (!alive) return;
     alive = false;
+    gen++;
     bakeGen++;
     window.removeEventListener('resize', onResize);
+    window.removeEventListener('popstate', onPopState);
     dprQuery.removeEventListener('change', onDpr);
     if (resizeRaf !== 0) cancelAnimationFrame(resizeRaf);
+    clearTimeout(stuckTimer);
+    closeStuck?.();
+    closeStuck = null;
+    animator?.cancelAll();
+    animator = null;
+    fx.destroy();
     board?.destroy();
     if (atlas) releaseAtlas(atlas);
     board = null;
