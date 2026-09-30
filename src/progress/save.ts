@@ -29,7 +29,9 @@ function isSave(v: unknown): v is SaveV1 {
   if (typeof v !== 'object' || v === null) return false;
   const o = v as Record<string, unknown>;
   if (o.version !== 1) return false;
-  if (!Array.isArray(o.won) || !o.won.every((n) => isInt(n) && n >= 1 && n <= LEVEL_COUNT)) return false;
+  if (!Array.isArray(o.won) || o.won.length > LEVEL_COUNT) return false;
+  if (!o.won.every((n) => isInt(n) && n >= 1 && n <= LEVEL_COUNT)) return false;
+  if (new Set(o.won).size !== o.won.length) return false;
   if (typeof o.welcomeSeen !== 'boolean' || typeof o.tutorialDone !== 'boolean') return false;
   if (typeof o.attempts !== 'object' || o.attempts === null || Array.isArray(o.attempts)) return false;
   for (const [k, n] of Object.entries(o.attempts)) {
@@ -55,7 +57,13 @@ export function writeSave(storage: Storage, s: SaveV1): void {
 
 /** The highest playable level: one past the highest win, clamped to the last level. */
 export function unlocked(s: SaveV1): number {
-  return Math.min(LEVEL_COUNT, Math.max(0, ...s.won) + 1);
+  // A loop, not `Math.max(...s.won)`: spreading an arbitrarily long win list would throw a
+  // RangeError, and this function must stay total for a save that never went through `isSave`.
+  let highest = 0;
+  for (const level of s.won) {
+    if (level > highest) highest = level;
+  }
+  return Math.min(LEVEL_COUNT, highest + 1);
 }
 
 /** The level to offer next: the lowest unlocked level not yet won, or `null` when all are won. */

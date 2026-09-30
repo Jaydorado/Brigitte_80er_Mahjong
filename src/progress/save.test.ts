@@ -60,6 +60,22 @@ describe('loadSave validation', () => {
       expect(loadSave(storage)).toEqual(freshSave());
     });
   }
+
+  it('falls back to a fresh save for a win list longer than the six levels, and never throws', () => {
+    const storage = new MemoryStorage();
+    storage.setItem(SAVE_KEY, JSON.stringify({ ...freshSave(), won: Array(10_000).fill(1) }));
+    const loaded = loadSave(storage);
+    expect(loaded).toEqual(freshSave());
+    expect(() => unlocked(loaded)).not.toThrow();
+    expect(unlocked(loaded)).toBe(1);
+  });
+
+  it('falls back to a fresh save for a win list with a duplicate level', () => {
+    const storage = new MemoryStorage();
+    storage.setItem(SAVE_KEY, JSON.stringify({ ...freshSave(), won: [1, 1, 2] }));
+    expect(loadSave(storage)).toEqual(freshSave());
+    expect(unlocked({ ...freshSave(), won: [1, 1, 2] })).toBe(3);
+  });
 });
 
 describe('unlocked', () => {
@@ -104,6 +120,15 @@ describe('nextAttempt', () => {
     const two = nextAttempt(one.save, 4);
     writeSave(storage, two.save);
     expect(loadSave(storage).attempts).toEqual({ 3: 1, 4: 1 });
+  });
+
+  it('persists the second attempt for the same level', () => {
+    const storage = new MemoryStorage();
+    const first = nextAttempt(freshSave(), 3);
+    const second = nextAttempt(first.save, 3);
+    expect(second.attempt).toBe(2);
+    writeSave(storage, second.save);
+    expect(loadSave(storage).attempts).toEqual({ 3: 2 });
   });
 });
 
