@@ -21,10 +21,12 @@ import { confirmLeave, showStuck } from './dialogs';
 import { createFx } from './fx';
 import { measureFrame, type Frame } from './frame';
 import { createHud } from './hud';
+import { startTutorial } from './tutorial';
 
 export interface LevelDeps { save: SaveV1; persist(s: SaveV1): void; onExit(): void; onWon(levelId: number): void }
 
 const ROTATE_TEXT = 'Bitte das Handy drehen';
+const TUTORIAL_LEVEL = 1;
 /** Long enough for the longest board animation (a relocating shuffle, 450 ms) to land. */
 const SETTLE_MS = 460;
 const CONFETTI_MS = 1500;
@@ -176,6 +178,13 @@ export function mountLevel(root: HTMLElement, level: LevelDef, deps: LevelDeps):
   let leaving = false;
   let confirming = false;
   let closeStuck: (() => void) | null = null;
+  /** The newest save this screen wrote (the tutorial flag and a win both build on it). */
+  let saved = save;
+  let cancelTutorial: (() => void) | null = null;
+  /** While the tutorial runs it owns board taps: it forwards the ones it allows to `dispatch`. */
+  let tutorialTap: ((slot: number) => void) | null = null;
+  let tutorialBoardChanged: (() => void) | null = null;
+  let tutorialTimer = 0;
   let stuckTimer = 0;
   /** The player closed the stuck dialog with ×, Escape or a backdrop tap: no re-offer until asked. */
   let stuckDismissed = false;
@@ -193,7 +202,7 @@ export function mountLevel(root: HTMLElement, level: LevelDef, deps: LevelDeps):
     const now = status(state);
     if (now === 'won') {
       won = true;
-      deps.persist(markWon(save, level.id)); // saved before anything plays
+      deps.persist((saved = markWon(saved, level.id))); // saved before anything plays
     }
     if (animator) animator.play(prev, state);
     hud.update(state);
@@ -280,6 +289,50 @@ export function mountLevel(root: HTMLElement, level: LevelDef, deps: LevelDeps):
     history.pushState({ [HISTORY_KEY]: level.id }, ''); // stay on the level while asking
     requestLeave();
   };
+
+  /** The board the tutorial sees: always the current one, with its taps routed to the tutorial. */
+  const tutorialBoard: BoardView = {
+    get el() {
+      return board!.el;
+    },
+    render: (s) => board!.render(s),
+    tileEl: (slot) => board!.tileEl(slot),
+    pos: (slot) => board!.pos(slot),
+    center: (slot) => board!.center(slot),
+    fit: (area) => board!.fit(area),
+    onTap: (cb) => {
+      tutorialTap = cb;
+    },
+    destroy() {},
+  };
+
+  /** Level 1, until it was done or skipped once: the guided tutorial starts once the board has settled. */
+  function scheduleTutorial(): void {
+    if (level.id !== TUTORIAL_LEVEL || saved.tutorialDone) return;
+    const g = gen;
+    tutorialTimer = window.setTimeout(() => {
+      tutorialTimer = 0;
+      if (g !== gen || won || leaving) return;
+      const [hint, undo, shuffle] = hud.el.querySelectorAll<HTMLElement>('.hud-btn');
+      cancelTutorial = startTutorial({
+        root: screen,
+        board: tutorialBoard,
+        getState: () => state,
+        dispatch,
+        helpers: { hint, undo, shuffle },
+        onBoardChange: (cb) => {
+          tutorialBoardChanged = cb;
+        },
+        onDone() {
+          tutorialTap = null;
+          tutorialBoardChanged = null;
+          cancelTutorial = null;
+          deps.persist((saved = { ...saved, tutorialDone: true }));
+        },
+      });
+    }, SETTLE_MS);
+  }
+
   history.pushState({ [HISTORY_KEY]: level.id }, '');
   window.addEventListener('popstate', onPopState);
 
@@ -311,7 +364,7 @@ export function mountLevel(root: HTMLElement, level: LevelDef, deps: LevelDeps):
     }
     animator?.finishAll(); // the old board lands in the current state before the swap
     const nb = createBoard(layout, next, w);
-    nb.onTap((slot) => dispatch({ type: 'tap', slot }));
+    nb.onTap((slot) => (tutorialTap ? tutorialTap(slot) : dispatch({ type: 'tap', slot })));
     paper.place(layout, w);
     nb.el.prepend(paper.el);
     nb.fit(frame.area);
@@ -335,6 +388,8 @@ export function mountLevel(root: HTMLElement, level: LevelDef, deps: LevelDeps):
         }
       }
     });
+    if (first) scheduleTutorial();
+    else tutorialBoardChanged?.();
     const px = await paper.fitText();
     if (alive && bake === bakeGen) console.info(`[level ${level.id}] clue ${px}px`);
   }
@@ -374,6 +429,11 @@ export function mountLevel(root: HTMLElement, level: LevelDef, deps: LevelDeps):
     dprQuery.removeEventListener('change', onDpr);
     if (resizeRaf !== 0) cancelAnimationFrame(resizeRaf);
     clearTimeout(stuckTimer);
+    clearTimeout(tutorialTimer);
+    cancelTutorial?.(); // an interrupted tutorial is not saved: it restarts next time
+    cancelTutorial = null;
+    tutorialTap = null;
+    tutorialBoardChanged = null;
     closeStuck?.();
     closeStuck = null;
     animator?.cancelAll();

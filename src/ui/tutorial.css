@@ -1,0 +1,150 @@
+/* Level-1 tutorial: the speech card, the ring on a tile and the ring on a helper button.
+   Motion is transform/opacity only and is off under prefers-reduced-motion. */
+
+.tut-card {
+  position: absolute;
+  z-index: 5; /* above the board, below the rotate overlay (10), dialogs (50) and effects (60) */
+  box-sizing: border-box;
+  width: 440px;
+  max-width: calc(100% - env(safe-area-inset-left) - env(safe-area-inset-right) - 72px - 24px);
+  padding: 10px 14px 8px;
+  border: 3px solid var(--gold);
+  border-radius: 20px;
+  background: var(--cream);
+  color: var(--plum);
+  font-family: var(--font-ui);
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.tut-card[data-pos='bl'],
+.tut-card[data-pos='br'] {
+  bottom: calc(env(safe-area-inset-bottom) + 10px);
+}
+
+.tut-card[data-pos='tl'],
+.tut-card[data-pos='tr'] {
+  top: calc(env(safe-area-inset-top) + 10px);
+}
+
+.tut-card[data-pos='bl'],
+.tut-card[data-pos='tl'] {
+  left: calc(env(safe-area-inset-left) + 12px);
+}
+
+.tut-card[data-pos='br'],
+.tut-card[data-pos='tr'] {
+  right: calc(env(safe-area-inset-right) + 72px + 12px);
+}
+
+.tut-text {
+  margin: 0 0 6px;
+  font-size: 22px;
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+.tut-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.tut-actions button {
+  font-family: inherit;
+  font-size: 22px;
+  font-weight: 700;
+  cursor: pointer;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.tut-actions [hidden] {
+  display: none;
+}
+
+.tut-skip {
+  min-width: 48px;
+  min-height: 48px;
+  padding: 0 6px;
+  border: 0;
+  background: none;
+  color: var(--berry);
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+
+.tut-next {
+  min-width: 120px;
+  min-height: 52px;
+  margin-left: auto;
+  padding: 0 24px;
+  border: 2px solid var(--gold);
+  border-radius: 14px;
+  background: linear-gradient(180deg, #a8436a 0%, var(--berry) 55%, var(--berry-deep) 100%);
+  color: var(--cream);
+}
+
+.tut-next:active {
+  background: linear-gradient(180deg, var(--berry-deep), var(--berry));
+}
+
+/* The ring on a tile sits in the board, above every tile and hint ring. */
+.tut-ring {
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: 100001;
+  width: calc(var(--face-w) + 14px);
+  height: calc(var(--face-h) + 14px);
+  margin: -7px 0 0 -7px;
+  pointer-events: none;
+}
+
+.tut-ring-glow {
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  height: 100%;
+  border: 5px solid #e8b64c;
+  border-radius: calc(var(--face-w) * 0.12 + 7px);
+  outline: 3px solid var(--berry);
+  background: rgba(255, 236, 170, 0.18);
+  animation: tut-pulse 0.9s ease-in-out infinite alternate;
+}
+
+/* The ring on a helper button stays inside the 72 px HUD column. */
+.hud button.tut-point {
+  position: relative;
+}
+
+.hud button.tut-point::after {
+  content: '';
+  position: absolute;
+  inset: -2px;
+  box-sizing: border-box;
+  border: 4px solid #e8b64c;
+  border-radius: 16px;
+  background: rgba(255, 236, 170, 0.18);
+  pointer-events: none;
+  animation: tut-pulse 0.9s ease-in-out infinite alternate;
+}
+
+@keyframes tut-pulse {
+  from {
+    opacity: 1;
+    transform: scale(1);
+  }
+  to {
+    opacity: 0.6;
+    transform: scale(1.05);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tut-ring-glow,
+  .hud button.tut-point::after {
+    animation: none;
+  }
+}

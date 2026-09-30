@@ -8,6 +8,7 @@ import { layouts } from '../core/layouts';
 import { attemptSeed, levels, type LevelDef } from '../levels/levels';
 import { freshSave, nextAttempt, type SaveV1 } from '../progress/save';
 import { mountLevel } from './levelScreen'; // vi.mock calls below are hoisted above this import
+import type { TutorialCtx } from './tutorial';
 
 const h = vi.hoisted(() => ({
   log: [] as string[],
@@ -17,6 +18,8 @@ const h = vi.hoisted(() => ({
   stuckOpts: null as { onDismiss?(): void } | null,
   leave: null as ((yes: boolean) => void) | null,
   idle: null as (() => void) | null,
+  tut: null as TutorialCtx | null,
+  saves: [] as SaveV1[],
 }));
 
 vi.mock('./atlas', () => ({ atlasDpr: () => 1, bakeAtlas: async () => ({}), releaseAtlas: () => {} }));
@@ -34,7 +37,7 @@ vi.mock('./board', () => ({
 vi.mock('./hud', () => ({
   createHud: (on: typeof h.hud) => {
     h.hud = on;
-    return { el: {}, update() {} };
+    return { el: { querySelectorAll: () => [{}, {}, {}] }, update() {} };
   },
 }));
 vi.mock('./anim', () => ({
@@ -56,6 +59,13 @@ vi.mock('./dialogs', () => ({
     const { promise, resolve } = Promise.withResolvers<boolean>();
     h.leave = resolve;
     return promise;
+  },
+}));
+vi.mock('./tutorial', () => ({
+  startTutorial: (ctx: TutorialCtx) => {
+    h.tut = ctx;
+    h.log.push('tutorial start');
+    return () => h.log.push('tutorial cancel');
   },
 }));
 vi.mock('./fx', () => ({
@@ -103,6 +113,8 @@ beforeEach(() => {
   h.stuckOpts = null;
   h.leave = null;
   h.idle = null;
+  h.tut = null;
+  h.saves.length = 0;
   vi.stubGlobal('document', { createElement: fakeEl });
   vi.stubGlobal('window', globalThis);
   vi.stubGlobal('matchMedia', () => ({ matches: false, addEventListener() {}, removeEventListener() {} }));
@@ -124,7 +136,10 @@ afterEach(() => {
 async function mount(level: LevelDef, save: SaveV1, onWon: () => void = () => {}): Promise<() => void> {
   const unmount = mountLevel(fakeEl() as unknown as HTMLElement, level, {
     save,
-    persist: (s) => h.log.push(`persist won=${JSON.stringify(s.won)}`),
+    persist: (s) => {
+      h.saves.push(s);
+      h.log.push(`persist won=${JSON.stringify(s.won)}`);
+    },
     onExit: () => h.log.push('exit'),
     onWon,
   });
@@ -228,5 +243,68 @@ describe('level screen lifecycle', () => {
     h.leave!(false);
     await vi.advanceTimersByTimeAsync(1000);
     expect(h.stuckOpen).toBe(2);
+  });
+
+  describe('tutorial', () => {
+    const done = (): SaveV1 => ({ ...freshSave(), tutorialDone: true });
+
+    it('starts on level 1 after the board settled, not before and not once done', async () => {
+      await mount(levels[0], freshSave());
+      expect(h.tut).toBeNull();
+      await vi.advanceTimersByTimeAsync(500);
+      expect(h.tut).not.toBeNull();
+    });
+
+    it('does not start when done, nor on other levels', async () => {
+      const unmount = await mount(levels[0], done());
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(h.tut).toBeNull();
+      unmount();
+      await mount(levels[1], freshSave());
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(h.tut).toBeNull();
+    });
+
+    it('routes board taps to the tutorial while it runs and saves tutorialDone (keeping the win later) when it is done', async () => {
+      const level = levels[0];
+      const save = freshSave();
+      await mount(level, save);
+      await vi.advanceTimersByTimeAsync(500);
+      const taps: number[] = [];
+      h.tut!.board.onTap((slot) => taps.push(slot));
+      h.tap!(3);
+      expect(taps).toEqual([3]);
+      expect(h.log).not.toContain('play selected');
+      expect(h.log).not.toContain('play blocked');
+
+      h.tut!.onDone();
+      expect(h.saves.at(-1)).toMatchObject({ tutorialDone: true, won: [] });
+      h.tap!(dealt(level, save).witness[0][0]); // the board plays again
+      expect(h.log).toContain('play selected');
+      expect(taps).toEqual([3]);
+      h.tap!(dealt(level, save).witness[0][0]); // deselect
+      for (const [a, b] of dealt(level, save).witness) {
+        h.tap!(a);
+        h.tap!(b);
+      }
+      expect(h.log).toContain('persist won=[1]');
+      expect(h.saves.at(-1)).toMatchObject({ tutorialDone: true, won: [1] });
+    });
+
+    it('unmounting mid-tutorial cancels it without saving', async () => {
+      const unmount = await mount(levels[0], freshSave());
+      await vi.advanceTimersByTimeAsync(500);
+      const persists = h.log.filter((l) => l.startsWith('persist')).length;
+      unmount();
+      expect(h.log).toContain('tutorial cancel');
+      expect(h.log.filter((l) => l.startsWith('persist')).length).toBe(persists);
+    });
+
+    it('unmounting before it started never starts it', async () => {
+      const unmount = await mount(levels[0], freshSave());
+      unmount();
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(h.tut).toBeNull();
+    });
   });
 });
