@@ -1,7 +1,11 @@
+import { layouts } from '../core/layouts';
+import { levels } from '../levels/levels';
 import { currentLevel } from '../progress/save';
 import type { SaveV1 } from '../progress/save';
 import { buildBalloons, buildCake, lightCandle, pauseOnHidden, setCandleState, setTopperActive } from './art/cake';
 import type { CakeArt } from './art/cake';
+import { atlasDpr, prebakeAtlas } from './atlas';
+import { measureFrame } from './frame';
 import { createFx } from './fx';
 import './screens.css';
 
@@ -113,6 +117,16 @@ export function mountMap(root: HTMLElement, opts: MapOpts): () => void {
     timers.push(window.setTimeout(fn, ms));
   };
 
+  // The level the pulsing candle opens is pre-baked in idle time (after any lighting moment), so its
+  // tap finds the atlas ready. The map and the level screens share the full-viewport, safe-area frame.
+  let gone = false;
+  let stopPrebake: (() => void) | null = null;
+  const prebake = (): void => {
+    const level = levels.find((l) => l.id === current);
+    if (gone || level === undefined) return;
+    stopPrebake = prebakeAtlas(level.faces, () => ({ w: measureFrame(screen, layouts[level.layoutId]).w, dpr: atlasDpr() }));
+  };
+
   if (holdFor !== undefined) {
     const candle = art.candles[holdFor - 1]!;
     later(() => {
@@ -123,15 +137,20 @@ export function mountMap(root: HTMLElement, opts: MapOpts): () => void {
       const y = r.top + r.height / 2;
       for (const [dx, dy, at] of SPARKLE_BURSTS) later(() => fx.sparkle(x + dx, y + dy), at);
       void fx.fireworks(FIREWORK_MS);
+      void fx.idle().then(prebake);
       later(() => {
         const next = art.candles[holdFor];
         if (next !== undefined && holdFor + 1 === current) setCandleState(next, 'current');
         setTopperActive(art, save.won.length === art.candles.length);
       }, NEXT_PULSE_DELAY_MS);
     }, LIT_DELAY_MS);
+  } else {
+    prebake();
   }
 
   return () => {
+    gone = true;
+    stopPrebake?.();
     for (const t of timers) clearTimeout(t);
     offPause();
     fx.destroy();

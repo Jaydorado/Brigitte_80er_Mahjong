@@ -45,10 +45,15 @@ export function createCluePaper(clue: string): CluePaper {
       await document.fonts.load(`700 ${MIN_PX}px ${DISPLAY_FONT}`);
       await document.fonts.ready;
       const innerH = el.clientHeight - parseFloat(getComputedStyle(el).paddingTop) * 2;
-      let px = MAX_PX;
-      for (; px > MIN_PX; px--) {
-        text.style.fontSize = `${px}px`;
-        if (text.scrollWidth <= text.clientWidth && text.scrollHeight <= innerH) break;
+      // Binary search for the largest size that fits (a larger size never fits better): about six
+      // layouts instead of up to forty. MIN_PX is the floor even when it overflows.
+      let px = MIN_PX;
+      let over = MAX_PX + 1; // smallest size known not to fit
+      while (over - px > 1) {
+        const mid = (px + over) >> 1;
+        text.style.fontSize = `${mid}px`;
+        if (text.scrollWidth <= text.clientWidth && text.scrollHeight <= innerH) px = mid;
+        else over = mid;
       }
       text.style.fontSize = `${px}px`;
       el.dataset.px = String(px);
