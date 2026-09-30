@@ -15,6 +15,9 @@ export type Screen =
   | { name: 'letter'; id: number; next: 'map' | 'closing' }
   | { name: 'closing' };
 
+/** The key levelScreen puts on the history entry it pushes (see `HISTORY_KEY` there). */
+const LEVEL_HISTORY_KEY = 'mahjong80Level';
+
 interface Host {
   readonly root: HTMLElement;
   readonly storage: Storage;
@@ -86,6 +89,10 @@ function mount(root: HTMLElement, s: Screen): () => void {
         persist,
         onExit: () => show({ name: 'map' }),
         onWon(id) {
+          // The level leaves its pushed history entry behind on a win; consume it so one Back on the
+          // letter or map does not land on a dead entry. After a Back during the celebration the entry
+          // is already gone and `history.state` no longer carries the key, so this never over-pops.
+          if ((history.state as Record<string, unknown> | null)?.[LEVEL_HISTORY_KEY] !== undefined) history.back();
           persist(markWon(save, id));
           litAfterLetter = id;
           show({ name: 'letter', id, next: id === 6 && firstWin ? 'closing' : 'map' });

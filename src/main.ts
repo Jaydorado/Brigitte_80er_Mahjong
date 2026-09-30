@@ -1,19 +1,15 @@
 import './ui/styles.css';
-import { levels } from './levels/levels';
-import { loadSave, writeSave } from './progress/save';
-import { mountLevel } from './ui/levelScreen';
+// install.ts attaches its `beforeinstallprompt` listener at module load, so it must load at startup.
+import './ui/install';
+import { loadSave, SAVE_KEY } from './progress/save';
+import { isSafeScreen, startRouter } from './ui/router';
+import { initSw } from './ui/sw';
 
 const root = document.querySelector<HTMLElement>('#app')!;
 
-// Temporary dev route until the screen router lands: `?level=N` mounts level N directly.
-const devLevel = levels.find((l) => l.id === Number(new URLSearchParams(location.search).get('level')));
-if (devLevel) {
-  mountLevel(root, devLevel, {
-    save: loadSave(localStorage),
-    persist: (s) => writeSave(localStorage, s),
-    onExit: () => location.assign(location.pathname),
-    onWon: (id) => console.info(`[level ${id}] won`),
-  });
-} else {
-  root.innerHTML = '<h1>Brigittes Mahjong</h1>';
-}
+// First run (no save yet): ask the browser to keep this origin's storage, so progress survives cleanup.
+if (localStorage.getItem(SAVE_KEY) === null) void navigator.storage?.persist?.();
+
+const save = loadSave(localStorage);
+startRouter(root, localStorage, save, save.welcomeSeen ? { name: 'map' } : { name: 'welcome' });
+initSw(isSafeScreen);
