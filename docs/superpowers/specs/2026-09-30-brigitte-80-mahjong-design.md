@@ -1,110 +1,168 @@
 # Brigittes Mahjong — Design
 
-Date: 2026-09-30. Status: sections 1–2 approved by Jay in chat; sections 3–5 delegated ("give it your best shot"), with performance and visual polish named as the top priorities. Author: `@default` (Claude Opus 5.5).
+Date: 2026-09-30. Revision 2 (after the adversarial review `docs/reviews/2026-09-30-mahjong-design-adversary.md` and Jay's switch to six text clues). Status:
+- Sections 1–2 were approved by Jay in chat.
+- Sections 3–5 were delegated to the author ("give it your best shot"), with performance and visual polish named as the top priorities.
+- Revision 2 awaits Jay's approval.
+
+Author: `@default` (Claude Opus 5.5).
 
 ## Goal
 
-A mahjong solitaire game in the style of Vita Mahjong, made as an 80th-birthday gift for Brigitte (Anna's mother). She plays 6 levels. Levels 1–5 each uncover one text hint about her present, and level 6 reveals it: a family trip to Gmunden. It reaches her as a GitHub Pages link that she installs herself as a fullscreen app on her Android phone, with nobody next to her.
+A mahjong solitaire game in the style of Vita Mahjong, made as an 80th-birthday gift for Brigitte (Anna's mother). She plays 6 levels, and each level uncovers one of six text clues about her present, a family trip to Gmunden. The clues let her guess; the game does not name the present in v1. A 7th level that reveals a photo may follow later (see Out of v1). The game reaches her as a GitHub Pages link that she installs herself as a fullscreen app on her Android phone, with nobody next to her.
 
 It must look polished and run smoothly on an ordinary Android phone. It is a gift and should impress on first launch.
 
 ## Hard constraints
 
-- **Target:** Android Chrome (current), phone, **landscape**, viewport ≥ 640×360 CSS px. Portrait shows a "Bitte das Handy drehen" overlay.
+- **Target:** Android Chrome (current), phone, **landscape**, viewport ≥ 640×360 CSS px after safe-area insets. The welcome and install help also work in portrait. The map and level screens show a "Bitte das Handy drehen" overlay in portrait.
 - **German only.** All player-facing text is German.
 - **Deadline:** playable and deployed by the weekend of 2026-10-03/04.
 - **No fail state:** no timer, no score, no lives, no lose screen. Hint, Undo, and Shuffle are free and unlimited.
-- **Every deal is solvable** (by construction, and proven by tests).
+- **The game can always be finished.** Every deal is solvable by construction, and *Mischen* always restores a solvable board, including after bad moves (see Shuffle).
 - **Offline after first load.** Progress persists on the device.
-- **Tile readability:** a tile face is ≥ 44 CSS px wide at 640×360.
+- **Tile readability:** the tile **face** (excluding edge and shadow) is ≥ 44 CSS px wide at 640×360.
 - **Performance budget** (see Performance) is an acceptance criterion, not a nice-to-have.
-- Spoiler risk from a public repo is accepted by Jay. Clue texts and the photo ship in plain form.
+- Spoiler risk from a public repo is accepted by Jay. Clue texts ship in plain form.
 
 ## Scope
 
-In v1: 6 levels, the clue under the tiles plus a clue letter after each win, the finale with the Gmunden photo, the cake map, a welcome screen with install guidance, a guided tutorial in level 1, Hint / Undo / Shuffle, PWA offline, and GitHub Pages deploy.
+In v1: 6 levels; the clue under the tiles plus a clue letter after each win; a closing screen after level 6 with all six clues; the cake map; welcome and install help; a guided tutorial in level 1; Hint / Undo / Shuffle; PWA offline; GitHub Pages deploy.
 
-Out of v1 (maybe after family feedback): sound/music, more levels, flower/season tiles, statistics, themes, iOS.
+Out of v1 (maybe after family feedback):
+- A 7th easy level with a photo of Gmunden under the tiles and a photo reveal. Designed for: `reveal` is a union type, and the cake can get a 7th candle.
+- Sound/music, more levels, flower/season tiles, statistics, themes, iOS.
 
-## Inputs from the family (not code)
+## Content
 
-All in `src/content.ts` and `public/`, editable without touching logic:
+All in `src/content.ts`, editable on GitHub in the browser without touching logic.
 
-- `welcome`: greeting and a short personal message.
-- `clues[0..4]`: the 5 text hints (Jay says these exist already).
-- `finale`: the present text (default "Dein Geschenk: Eine Reise nach Gmunden mit der ganzen Familie!").
+**Clues** (from Jay, verbatim; the family may polish spelling and capitalisation there):
+
+|Level|Clue|
+|---|---|
+|1|Familie|
+|2|9h 31 selzthal umsteigen|
+|3|Grün/weiß|
+|4|Klaus wildbolz/Albert fortell|
+|5|Bezirkschulinspektor|
+|6|12.2. 1989|
+
+The longest is 31 characters. "Bezirkschulinspektor" is one 20-character word and sets the minimum paper width.
+
+**Family texts still needed.** Until the family supplies them, they ship as `[Beispiel] …` placeholders:
+- `welcome`: greeting and a personal message.
+- `finale`: the closing line, e.g. "Errätst du, was wir vorhaben?"
 - `credit`: sign-off line.
-- `public/gmunden.jpg`: a landscape photo of Gmunden, ≥ 1600 px wide, JPEG ≤ 400 KB.
 
-Deploying to Brigitte is blocked until all of these are filled in. Development builds may run with obviously marked sample text (`[Beispiel] …`). A test fails on a `main` build if any content string still starts with `[Beispiel]`, so sample text cannot reach her.
+A test fails whenever any content string starts with `[Beispiel]`. CI runs it on every push to `main`, so a build with placeholder text cannot deploy.
 
 ## Stack
 
-Same as Solitaire Dreams (`../Anna's Disney Solitaire clone`): TypeScript + Vite, DOM plus SVG, one `<canvas>` for effects, `vite-plugin-pwa` (autoUpdate), Vitest, and GitHub Actions deploying to GitHub Pages. No UI framework, no game engine. The CI workflow, PWA config, save pattern, and board-fit approach are reused from that repo.
+Same as Solitaire Dreams (`../Anna's Disney Solitaire clone`): TypeScript + Vite, DOM plus SVG, one `<canvas>` for effects, `vite-plugin-pwa`, Vitest, and GitHub Actions deploying to GitHub Pages. No UI framework, no game engine. The CI workflow, PWA config, save pattern, and safe-area-aware board-fit approach (`src/ui/frame.ts`) are reused.
 
-- Repo: `https://github.com/Jaydorado/Brigitte_80er_Mahjong`
-- Live URL: `https://jaydorado.github.io/Brigitte_80er_Mahjong/` (CI sets `VITE_BASE=/Brigitte_80er_Mahjong/`)
+- Repo: `https://github.com/Jaydorado/Brigitte_80er_Mahjong`.
+- Live URL: `https://jaydorado.github.io/Brigitte_80er_Mahjong/`. CI sets `VITE_BASE=/Brigitte_80er_Mahjong/`.
 - Jay's one-time step: Settings → Pages → Source: GitHub Actions.
 
 ## Architecture
 
 ```
 src/
-  content.ts          family-editable text (see Inputs)
+  content.ts          clues + family texts (see Content)
   core/               pure TS: no DOM, no timers, no Math.random
     tiles.ts          FaceId (34 faces: dots 1–9, bamboo 1–9, characters 1–9, 4 winds, 3 dragons)
     rng.ts            seeded PRNG (mulberry32) + Fisher–Yates
-    layout.ts         Slot {col, row, layer}; Layout {slots, clueRect}; isFree(slot, occupied)
-    layouts.ts        the 6 board shapes as data
-    deal.ts           deal(layout, faces, seed) and reshuffle(state, seed): solvable by construction
-    game.ts           GameState; reduce(state, select | undo | shuffle) → state; freePairs(); status
-    solver.ts         bounded memoized DFS solvability check (tests only)
+    layout.ts         Slot {col, row, layer}; Layout {slots, clueRect, certificate}; isFree(slot, occupied)
+    layouts.ts        the 6 board shapes as data (generated certificate included)
+    deal.ts           peel(), deal(), shuffleInPlace(), relocate()
+    game.ts           GameState; reduce(state, action) → state; freePairs(); status
+    solver.ts         exhaustive DFS for small test fixtures only
   levels/levels.ts    6 LevelDefs
   progress/save.ts    versioned localStorage
   ui/
+    frame.ts          safe-area-aware board area + tile fit
     atlas.ts          bakes tile images into one sprite canvas (see Performance)
-    board.ts          tile elements, board fit, selection/hint overlay
+    board.ts          tile elements, selection/hint overlay, board animations
     hud.ts            back, tiles left, Tipp / Zurück / Mischen
     map.ts            cake with 6 candles
-    cluePaper.ts      clue text or photo under the board
-    dialogs.ts        stuck dialog, clue letter
-    finale.ts         present reveal
+    cluePaper.ts      clue text under the board
+    dialogs.ts        stuck dialog, leave-level confirm, clue letter
+    closing.ts        closing screen after level 6
     tutorial.ts       level-1 guidance
-    welcome.ts        greeting + install guidance
+    welcome.ts        greeting + install help
     fx.ts             particle canvas: sparkles, confetti, fireworks
-    art/              SVG/CSS art: tile body, cake, backgrounds, envelope; tile faces from vendor/
-  vendor/tiles/       FluffyStuff riichi-mahjong-tiles SVGs (CC0), the 34 used faces only
-  main.ts             screen router: welcome → map ↔ level → letter → map / finale
+    art/              SVG/CSS art: tile body, cake, backgrounds, envelope
+  vendor/tiles/       FluffyStuff riichi-mahjong-tiles SVGs (CC0, verified), the 34 used faces
+  main.ts             screen router
+tools/certify.ts      generates and checks each layout's certificate
 ```
 
 `core/` never imports from `ui/`. UI dispatches actions, the reducer returns new state, and the UI animates the difference.
 
+## Geometry
+
+- **Slots:** a slot has `col` and `row` in half-tile units and a `layer` (0 = bottom). A tile occupies a 2×2 half-unit footprint. No two slots on the same layer overlap.
+- **Tile proportions:**
+  - The face is 4:5 (width:height). "Tile width" always means face width `w`.
+  - Each layer above 0 is drawn shifted up and left by `0.06w` per layer.
+  - The side edge (right and bottom) is `0.12w` deep.
+  - The baked shadow extends `0.06w` beyond the edge.
+- **Board fit:** the board area is the viewport minus safe-area insets, minus the 72 px HUD column, minus 8 px margins. `w` is the largest value at which the **full rendered extent** fits: every tile's face, edge, shadow, and layer offsets. `w` is floored to a whole CSS px.
+- **Authoring guide:** the layer-0 bounding box of every layout is ≤ **11 columns × 5 rows**. At 640×360 that gives w ≈ 48 px:
+  - width `552 / (11 + 0.18 + 0.18)` = 48.6
+  - height `344 / (5 × 1.25 + 0.18 + 0.18)` = 52.0
+
+  The binding acceptance is the fit test: w ≥ 44 at 640×360 for every layout.
+- **Hit targets:** a tile's hit target is its face rectangle, and tiles are exempt from the 48 px touch-target floor. Every other control is ≥ 48 px, and the helper buttons are ≥ 56 px. This exception is flagged for Jay: adjacent 44 px tiles cannot each have a non-overlapping 48 px target.
+
 ## Game rules
 
-**Coordinates.** A slot has `col` and `row` in half-tile units (so tiles can sit offset by half a tile) and a `layer` (0 = bottom). A tile covers a 2×2 half-unit footprint. The tile aspect is **4:5** (width:height). Each layer above 0 is drawn shifted up and left by 0.06 tile widths, and the side edge is 0.12 tile widths deep.
+- **Free tile.** A tile is free iff:
+  - no tile on a higher layer overlaps its footprint; and
+  - on its own layer, its left side or its right side has no adjacent tile. A tile is adjacent on a side when it sits exactly 2 half-units away horizontally with overlapping vertical footprints.
+- **Select and match.** Tap a free tile to select it (gold glow). Tap a free tile with the same `FaceId` to remove both.
+  - Tapping the selected tile again deselects it.
+  - Tapping a free tile with a different face moves the selection.
+  - Tapping a blocked tile does not select it; it wiggles.
 
-**Free tile.** A tile is free iff (a) no tile on a higher layer overlaps its footprint, and (b) on its own layer, its left side or its right side has no adjacent tile. A tile is adjacent on a side when it sits 2 half-units away horizontally with vertical footprints overlapping.
+  Selecting uses no history entry.
+- **Win.** The board is empty. The win is checked before stuck.
+- **Stuck.** Tiles remain and no free matching pair exists.
 
-**Match.** Tap a free tile to select it (gold glow). Tap a free tile with the same `FaceId` to remove both. Tap the selected tile again to deselect. Tapping a different free tile with a different face moves the selection. Tapping a blocked tile does not select it; it wiggles.
+**History and Undo.** History is a stack of entries, one per successful pair removal or shuffle:
+- `match`: the two slots and their faces.
+- `shuffle`: the full slot→face map and occupied set from before the shuffle.
 
-**Undo.** Restores the last removed pair. Unlimited, back to the level start. A shuffle is also an undoable step.
+*Zurück* pops one entry and restores exactly that state. It is unlimited, back to the level start. Every board-changing action clears the selection and hint. The shuffle counter only ever increases: undoing a shuffle and shuffling again gives a new arrangement.
 
-**Shuffle.** Reassigns the faces of the remaining tiles to the remaining slots so that the remaining board is solvable (see Deal). The multiset of faces is kept. Always available.
+**Hint.** Pulses one free matching pair. If none exists, it opens the stuck dialog.
 
-**Hint.** Pulses one free matching pair. If none exist, it opens the stuck dialog.
+**Stuck dialog.** It opens once each time the board *becomes* stuck, after running animations settle. Title: "Keine passenden Steine mehr frei". Buttons: *Mischen* (primary), *Letztes Paar zurück* (hidden when history is empty), and a close ×. After closing, the HUD stays usable and *Tipp* reopens the dialog. Because it offers Undo directly, shuffle → undo → stuck can never trap her.
 
-**Stuck.** When no free matching pair exists and tiles remain, a friendly dialog opens ("Keine passenden Steine mehr frei") with the button *Mischen*. It does not open while an animation runs.
+## Deal and Shuffle (solvable by construction)
 
-**Win.** The board is empty.
+**Peel.** `peel(occupied, rng, maxTries)` searches for a removal order of an occupied slot set:
+1. Repeatedly pick 2 distinct free slots at random and remove them, recording each pair.
+2. If fewer than 2 free slots remain before the set is empty, start the try over.
+3. It returns the order, or `null` after `maxTries`.
 
-## Deal (solvable by construction)
+**Certificate.** Each layout ships one verified full-board removal order (`Layout.certificate`), generated by `tools/certify.ts` and checked by a test. It guarantees that a deal and a relocation always terminate.
 
-`deal(layout, faceCount, seed)`:
+**Deal.** `deal(layout, faceCount, seed)`:
+1. Get an order: `peel(allSlots, rng, 1000)`, falling back to the certificate if it returns `null`.
+2. Build a face multiset: `tiles/2` pairs over `faceCount` faces, with per-face pair counts differing by ≤ 1. Shuffle the pairs and assign one pair to each recorded removal pair.
+3. The order is stored on the state as the attempt's **witness**. Replaying it is a legal solution. Assigning identical faces to pairs that are simultaneously free in a peel cannot be broken by removing either one first.
 
-1. **Removal order.** Start with all slots occupied. Repeatedly pick 2 distinct free slots at random (seeded) and remove them, recording the pair. If fewer than 2 free slots remain before the board is empty, restart with the next PRNG draw. Allow up to 1000 restarts; a layout that exceeds that fails its test.
-2. **Faces.** Build a face multiset with `tiles/2` pairs spread over `faceCount` faces as evenly as possible (per-face pair counts differ by ≤ 1). Shuffle the pairs and assign one pair to each recorded removal pair.
+**Mischen.** It always ends on a solvable board with the same face multiset:
+1. **In place:** `peel(currentOccupied, rng, 200)`. If it finds an order, reassign the remaining faces along it. Tiles stay where they are; only faces change (a quick flip-fade animation).
+2. **Relocate** (when step 1 fails, e.g. a tile stacked on its only twin): with `m` pairs remaining, move the remaining tiles onto the slots of the **last `m` pairs of the layout's certificate**. That occupancy is exactly the certificate's state after its first `k−m` pairs, so its suffix is a valid removal order. Assign face pairs along that suffix. Tiles fly to their new slots. This may cover parts of the clue again; that is acceptable for a rare case.
 
-The recorded removal order is then a valid solution. `reshuffle` runs the same algorithm on the remaining slots with the remaining face multiset. It stays valid because every face's remaining count is always even. Seeds: each attempt uses `seed = hash(levelId, attemptCounter)`, and each shuffle uses `hash(attemptSeed, shuffleCount)`. `attemptCounter` persists, so replays deal differently.
+The result's removal order becomes the new witness. Seeds:
+- attempt: `hash(levelId, attemptCounter)`
+- shuffle: `hash(attemptSeed, shuffleCounter)`
+
+`attemptCounter` is saved when a level is entered, so every entry deals differently.
 
 ## Levels
 
@@ -112,47 +170,73 @@ The recorded removal order is then a valid solution. `reshuffle` runs the same a
 interface LevelDef {
   id: 1 | 2 | 3 | 4 | 5 | 6;
   layoutId: LayoutId;
-  faceCount: number;      // distinct faces used
-  reveal: { kind: 'clue'; index: 0 | 1 | 2 | 3 | 4 } | { kind: 'photo' };
+  faceCount: number;
+  clueIndex: 0 | 1 | 2 | 3 | 4 | 5;
   difficulty: 'leicht' | 'mittel' | 'schwer';
 }
 ```
 
-|#|Difficulty|Tiles|Layers|Faces|Shape|Reveal|
+|#|Difficulty|Tiles|Layers|Faces|Shape|Clue|
 |---|---|---|---|---|---|---|
-|1|leicht|36|2|9|wide rectangle (tutorial)|clue 1|
-|2|leicht|48|2|12|gift box with bow|clue 2|
-|3|mittel|64|3|18|flower|clue 3|
-|4|mittel|72|3|24|two balloons|clue 4|
-|5|schwer|88|4|34|stepped pyramid|clue 5|
-|6|schwer|96|4|34|the number "80"|photo|
+|1|leicht|36|2|9|wide rectangle (tutorial)|Familie|
+|2|leicht|48|2|12|gift box with bow|9h 31 selzthal umsteigen|
+|3|mittel|64|3|18|flower|Grün/weiß|
+|4|mittel|72|3|24|two balloons|Klaus wildbolz/Albert fortell|
+|5|schwer|88|4|34|stepped pyramid|Bezirkschulinspektor|
+|6|schwer|96|4|34|the number "80" (layer 0 about 9×5)|12.2. 1989|
 
-Every layout's layer-0 footprint should stay within **12 tile columns × 6 tile rows**. The binding rule is the board-fit test: at a 640×360 viewport, with the 72 px HUD column and 8 px margins (board area 552×344), the fitted tile width is ≥ 44 px for every layout, including layer offsets and edge depth. Faces for levels 1–2 favour dots and winds, which have the highest contrast. Shapes are data; their exact outlines are tuned during the build within these counts and bounds.
+- Faces for levels 1–2 favour dots and winds, which have the highest contrast.
+- The exact outlines are tuned during the build, within these counts and the authoring guide.
+- Capacity check (from the review): a 4×5 pixel "8" plus a 4×5 "0" gives 30 layer-0 positions in 9×5, and 96 tiles over 4 layers fits.
 
 ## Clue under the tiles
 
-Each layout declares a `clueRect` in slot coordinates. The union of layer-0 tile footprints must fully cover `clueRect`, and a test checks this. `cluePaper` renders a cream paper card at `clueRect` beneath the tiles:
-- Levels 1–5: the clue text, auto-sized to the largest font that fits, never below 20 px. If it doesn't fit at 20 px, a content test fails.
-- Level 6: `gmunden.jpg`, cropped with `object-fit: cover`.
-
-Removing tiles reveals what is underneath. Nothing is masked or computed.
+- **Paper rectangle.** Each layout declares a `clueRect` in half-unit coordinates. It must lie within the union of layer-0 face rectangles, inset by `0.1w` from every outer boundary so rounded corners cannot leak. A test checks this against the layout data.
+- **Opaque tiles.** The tile body is opaque across its whole face rectangle in the atlas.
+- **Rendering.** `cluePaper` renders a cream paper card at `clueRect` beneath the tiles, with 8 px padding and the clue centred. It uses the bundled display font, auto-sized to the largest size that fits, never below 24 px, and never breaks inside a word.
+- **When it's hidden.** The clue is concealed at deal time. It becomes readable as tiles are removed; reading it before the last pair is intended.
+- **Fit acceptance** happens in the browser smoke at 640×360, after `document.fonts.ready`: each level's paper shows its clue at ≥ 24 px with no overflow. The unit test keeps a cheap lint: an average glyph width of 0.6 em, and the longest word must fit the paper width at 24 px.
 
 ## Screens and flow
 
-1. **Welcome** (until dismissed once): greeting from `content.welcome`, and if the game is not installed (`display-mode` is not `fullscreen`/`standalone`), install guidance. The guidance is a single "Als App installieren" button driven by `beforeinstallprompt` when Chrome offers it, or else a 2-step German illustrated hint (⋮ menu → "Zum Startbildschirm hinzufügen"). Button *Los geht's*.
-2. **Map:** a layered birthday cake with an "80" topper and 6 candles. Candle states: locked (dim), current (gentle pulse), won (lit, flickering flame, envelope beside it). Tapping the current or a won candle starts that level. Tapping an envelope reopens that clue letter. After level 6 is won, tapping the topper replays the finale. The install button also appears here while the game is not installed.
-3. **Level:** background, clue paper, board, and a 72 px HUD column on the right. From the top, it holds: back to the map, tiles left, and three ≥ 56 px buttons *Tipp*, *Zurück*, *Mischen*, each with an icon and label. No HUD element overlaps the board. Leaving mid-level discards the board; re-entering deals fresh.
-4. **Win (levels 1–5):**
-   1. Last pair flies off.
-   2. Confetti plays for 1.5 s.
-   3. The clue letter opens: an envelope flap animates open, and a card rises showing "Hinweis N von 5" plus the clue at ≥ 28 px.
-   4. *Weiter* returns to the map, where the new candle lights with a flame burst, then the next candle starts pulsing.
-5. **Win (level 6), the finale:** full-screen photo with a slow zoom (Ken Burns, transform only), fireworks, then `content.finale` and `content.credit` fade in. All 6 candles shown lit. Button *Zur Torte*.
-6. **Tutorial (level 1, first time only, skippable):**
-   1. A free pair glows: "Tippe auf einen leuchtenden Stein".
-   2. "Jetzt tippe auf seinen Zwilling".
-   3. On the first blocked-tile tap: "Dieser Stein ist noch blockiert. Freie Steine haben oben nichts und links oder rechts Platz."
-   4. Finally it points at the three helper buttons.
+1. **Welcome** (first launch, and whenever opened from the map's "?" button). It works in portrait and landscape and shows:
+   - The greeting from `content.welcome`.
+   - **Install help**, shown when the page is not running as an installed app (`display-mode` is neither `fullscreen` nor `standalone`):
+     - If Chrome has fired `beforeinstallprompt` (it may arrive late, so the page listens the whole time), a big button *Als App installieren*. The prompt can be used once; after it is accepted or dismissed, the button is replaced by the manual steps.
+     - Otherwise, illustrated manual steps: "Oben rechts auf ⋮ tippen → „App installieren" (oder „Zum Startbildschirm hinzufügen")". Then: "Danach das Torten-Symbol auf dem Startbildschirm öffnen". Plus: "Schon installiert? Dann einfach das Torten-Symbol öffnen."
+   - A *Los geht's* button.
+2. **Map:**
+   - A layered birthday cake with an "80" topper and 6 candles.
+   - Candle states: locked (dim); current (gentle pulse), meaning the lowest unlocked level that has not been won, with no current candle once all are won; won (lit, flickering flame, envelope beside it).
+   - Tapping the current candle or a won candle starts that level. Tapping an envelope reopens that clue letter.
+   - After level 6 is won, tapping the topper reopens the closing screen.
+   - A "?" button reopens the welcome/install help.
+3. **Level:** background, clue paper, board, and the 72 px HUD column on the right. From the top, the HUD holds: back to the map, tiles left, and *Tipp*, *Zurück*, *Mischen* (≥ 56 px, icon + label). No HUD element overlaps the board.
+   - Back: if at least one pair has been removed, a confirmation appears first: "Level verlassen? Beim nächsten Mal werden die Steine neu gemischt." Android's system Back follows the same path.
+4. **Win:**
+   1. At the winning transition, the win and unlock are saved *before* any celebration.
+   2. The last pair flies off, and confetti plays for 1.5 s.
+   3. The clue letter opens: an envelope flap animates open, and a card rises with "Hinweis N von 6" and the clue at ≥ 28 px.
+   4. *Weiter* returns to the map: the new candle lights with a flame burst, and the next candle starts pulsing. After level 6, *Weiter* goes to the closing screen instead.
+5. **Closing screen (after level 6):**
+   - Fireworks.
+   - A parchment with all six clues listed.
+   - `content.finale` and `content.credit`.
+   - All 6 candles shown lit.
+   - Button *Zur Torte*.
+6. **Tutorial** (level 1, first entry, unconditional, with a skip link on every step). Board input is limited to the step's target. Taps elsewhere give a gentle nudge on the target.
+   1. A free pair glows: "Tippe auf diesen Stein." → "Jetzt auf den gleichen Stein. Gleiche Bilder passen zusammen."
+   2. The pair flies off, then: "Nur freie Steine kann man nehmen: Es liegt kein Stein darauf, und links oder rechts ist Platz." Two example tiles on the board are ringed in turn, one covered from above and one blocked on both sides, each with a one-line caption.
+   3. The three helper buttons are pointed at in turn with one line each, then "Viel Spaß!".
+
+   `tutorialDone` is saved at the end or on skip. Leaving the level or suspending the app mid-tutorial restarts it on the next entry.
+
+## Interaction and lifecycle
+
+- **One board transition at a time.** A board-changing action (match, undo, shuffle) first *finishes* any running board animation, jumping it to its end state, then applies itself. Taps never get lost or queue up.
+- **Screen generation.** Each screen mount has a generation number. Async work (atlas bake, animation callbacks, the stuck dialog, the win sequence) checks it and does nothing if the screen has changed. Unmounting cancels all animations under the screen.
+- **Atlas swap.** A new atlas (after resize or a DPR change) is applied only to the generation that requested it. The old blob URL is revoked once the new one is displayed.
+- **Updates.** `vite-plugin-pwa` with `registerType: 'prompt'` and no prompt UI. When a new version is waiting, it is activated only while the map or welcome screen is showing, or on the next launch. It never reloads during a level.
 
 ## Save
 
@@ -161,86 +245,141 @@ localStorage key `mahjong80.save`:
 ```ts
 interface SaveV1 {
   version: 1;
-  unlocked: 1 | 2 | 3 | 4 | 5 | 6;   // highest playable level
   won: number[];                     // level ids won at least once
   welcomeSeen: boolean;
   tutorialDone: boolean;
-  attempts: Record<number, number>;  // per-level attempt counter (deal seeds)
+  attempts: Record<number, number>;  // per-level attempt counter
 }
 ```
 
-A missing, unparsable, schema-invalid, or unknown-version save → a fresh save. The first run calls `navigator.storage.persist()`. It writes on every state change that matters: win, unlock, flags.
+- `unlocked` is derived: the highest won level + 1, capped at 6.
+- A missing, unparsable, schema-invalid, or unknown-version save → a fresh save.
+- The first run calls `navigator.storage.persist()`.
+- Writes happen on level entry (attempt counter), at the winning transition, and on flag changes.
+- The board itself is never saved. Leaving the level or the app mid-board restarts that level with a fresh deal.
 
 ## Art
 
-- **Palette:** cream `#FFF8EE`, champagne gold `#D9B26F`, rose `#E89AA8`, berry `#8E2F4F`, deep plum text `#3A1F2B`. Contrast of text on backgrounds ≥ 7:1.
-- **Tiles:** an ivory face with a soft vertical gradient, a rounded bevel, a warm jade-green side edge (visible bottom and right, giving the 3D depth), and a baked soft drop shadow. The FluffyStuff face art sits centred. Suit tiles get a large deep-plum numeral 1–9 in the top-left corner; winds get O / S / W / N (German). Selected tiles show a gold glow ring; hint tiles a pulsing soft gold ring.
-- **Backgrounds:** a warm gradient with soft blurred light circles (bokeh) and a strip of bunting along the top. Each level has its own hue. During a level the background is static (see Performance).
-- **Cake map:** a three-tier cake in SVG, with icing drips, sprinkles, the "80" topper, and 6 candles. Flames are small SVG shapes animated by transform/opacity only.
+- **Palette:** cream `#FFF8EE`, champagne gold `#D9B26F`, rose `#E89AA8`, berry `#8E2F4F`, deep plum text `#3A1F2B`. Text-on-background contrast is ≥ 7:1.
+- **Tiles:**
+  - An ivory face with a soft vertical gradient and a rounded bevel.
+  - A warm jade-green side edge along the bottom and right.
+  - A baked soft shadow.
+  - The FluffyStuff face art centred.
+  - Suit tiles carry a large deep-plum numeral 1–9 in the top-left corner; winds carry O / S / W / N.
+  - The selection is a gold glow ring; a hint is a pulsing soft gold ring.
+- **Backgrounds:** a warm gradient with soft light circles (bokeh) and bunting along the top. Each level has its own hue. It is static during a level.
+- **Cake map:** a three-tier SVG cake with icing drips, sprinkles, the "80" topper, and 6 candles. Flames animate with transform and opacity only.
 - **Effects:**
-  - Match: the pair slides together to the midpoint, scales down and fades out, and a gold sparkle burst plays.
-  - Win: confetti in palette colours.
-  - Finale: fireworks.
-  - Candle lighting: a flame pop and glow.
-- **Type:** a system-safe rounded sans for the UI, and a serif display face (bundled, one weight, ≤ 60 KB WOFF2, OFL) for letters and titles. Body ≥ 20 px, clue letter ≥ 28 px, touch targets ≥ 48 px (helpers ≥ 56 px).
-- `prefers-reduced-motion`: particle bursts are dropped, and the envelope opens with a fade.
+  - Match: the pair slides to the midpoint, scales down and fades out, and a gold sparkle burst plays.
+  - Win: confetti.
+  - Closing screen: fireworks.
+  - Candle lighting: a flame pop.
+- **Type:**
+  - UI: a system rounded sans.
+  - Paper, letters, and titles: a bundled serif display face (one weight, ≤ 60 KB WOFF2, OFL).
+  - Body text ≥ 20 px, clue under the tiles ≥ 24 px, clue letter ≥ 28 px.
+- **Reduced motion** (`prefers-reduced-motion`): particles are dropped, and the envelope and tile moves become fades.
 
 ## Performance
 
-Lessons from Solitaire Dreams (commit `667454e`): always-on `perspective` / `preserve-3d` on every card gave each card its own compositor layer, and ambient star animations kept running behind the opaque level screen. The rules below prevent both. The look comes from baked art, not live effects.
+Lessons from Solitaire Dreams (commit `667454e`):
+- Always-on `perspective` / `preserve-3d` on every card gave each card its own compositor layer.
+- Ambient star animations kept running behind the opaque level screen.
+
+The rules below prevent both. The look comes from baked art, not live effects.
 
 **Rules**
 
-1. **Baked tile atlas.** At level start (and on resize / DPR change), `atlas.ts` renders each face used by the level, complete with body, bevel, edge, shadow, face art, and numeral, once into one sprite `<canvas>` at `min(devicePixelRatio, 3)`. That canvas is exported as one blob URL. Every tile is a single `<div>` showing its atlas region via `background-image` / `background-position`. There is no inline SVG per tile, and no CSS `filter`, `box-shadow`, or `backdrop-filter` on tiles.
-2. **Tiles are flat at rest:** positioned once per board fit, with no `will-change`, no 3D, and no transitions on idle tiles. `will-change: transform, opacity` is set only on the 2 tiles currently animating and removed when they finish.
-3. **One overlay for selection and hint:** a single glow element moved to the selected tile, and at most two hint rings. No per-tile class that repaints shadows.
-4. **One effects canvas:** a full-screen `<canvas>` for all particles, pooled, with ≤ 300 live particles. It runs a `requestAnimationFrame` loop only while particles are alive, and its backing store is capped at DPR 2.
-5. **No ambient animation behind a level:** the level background is a static image, generated once, and bokeh and bunting do not move. Ambient animations (candle flames, bokeh drift) run only on the map and in the finale, and pause on `visibilitychange: hidden`.
-6. **No layout thrash:** board fit is computed once per resize. No DOM layout reads (`getBoundingClientRect`, `offset*`) during animations; tile positions come from the layout math.
-7. **Assets:** total precache ≤ 2 MB. `gmunden.jpg` ≤ 400 KB, preloaded and `decode()`d before level 6's board appears. Only the 34 used FluffyStuff SVGs are bundled.
+1. **Baked tile atlas.** At level start, and on a resize or DPR change, `atlas.ts` renders each face the level uses into one sprite `<canvas>`, packed as a grid with 2 px gutters, at `min(devicePixelRatio, 3)`. Each cell holds the complete tile: body, bevel, edge, shadow, face art, and numeral.
+   - The canvas is exported once as a blob URL.
+   - Each tile is a single `<div>` showing its region via `background-image` / `background-position`.
+   - The 34 face SVGs are decoded once per app session.
+   - Not allowed on tiles: inline SVG per tile, CSS `filter`, `box-shadow`, `backdrop-filter`.
+2. **Tiles are flat at rest.** Each is positioned once per board fit, with no `will-change`, no 3D, and no transitions on idle tiles. `will-change: transform, opacity` is set only on tiles that are animating, and removed when they finish.
+3. **One overlay for selection and hint:** a single glow element that moves to the selected tile, plus at most two hint rings.
+4. **One effects canvas:** full screen, pooled, ≤ 300 live particles, with its backing store capped at DPR 2. Its `requestAnimationFrame` loop runs only while particles are alive.
+5. **No ambient animation behind a level.** The level background is static. Ambient animations (candle flames, bokeh drift) run only on the map and the closing screen, and pause on `visibilitychange: hidden`.
+6. **No layout thrash.** The board fit is computed once per resize. No DOM layout reads during animations; positions come from the layout math.
+7. **Assets:** total precache ≤ 2 MB. Only the 34 used face SVGs and one font are bundled.
 8. **Animations use only `transform` and `opacity`** (Web Animations API or CSS), plus canvas drawing.
 
-**Budget** (acceptance; measured in Chrome DevTools at 800×360, DPR 3, CPU throttling 4×):
+**Budget** (acceptance):
 
-- A pair match and the win confetti keep ≥ 55 fps on average, with no dropped-frame run over 100 ms.
-- No long task > 50 ms during play (tap → selection → match).
-- Level start (atlas bake + deal + first paint) ≤ 400 ms on level 6.
-- The Layers panel shows ≤ 12 compositor layers in a resting level.
+- **Desktop protocol.** Chrome DevTools device emulation at 800×360, DPR 3, CPU throttling 4×, warm start (second load, service worker active). Report the Chrome version and the median of 3 runs.
+  - Scenario: enter level 6; make 5 matches, 1 undo, and 1 shuffle; take the win on level 1 with confetti.
+  - Frames: ≥ 55 fps on average during match and confetti animations, and no dropped-frame run over 100 ms.
+  - No long task > 50 ms from tap to selection or match.
+  - Level start ≤ 400 ms on level 6, from the candle tap to the first frame with every tile painted. Measured with `performance.mark` at the tap and after the atlas image has decoded plus one rAF.
+  - A resting level (no selection or hint) has ≤ 12 compositor layers in the Layers panel.
+- **Physical device.** Install on a real Android phone (Jay's or his girlfriend's), then launch from the icon (fullscreen, landscape). Play level 1 to the win and level 6 for a few matches. It should be visibly smooth, with no hitches on match, shuffle, or confetti. Report the phone model. Desktop throttling does not simulate a phone GPU, so this check is mandatory.
 
 ## PWA & hosting
 
-- `vite-plugin-pwa`, `registerType: 'autoUpdate'`, precaching all build assets including `gmunden.jpg` and the font.
-- Manifest: name "Brigittes Mahjong", short name "Mahjong", `display: fullscreen`, `orientation: landscape`, palette colours, 192/512 and maskable icons (a cake with "80").
-- GitHub Actions on push to `main`: `npm ci`, `npm test`, `npm run build` with `VITE_BASE=/Brigitte_80er_Mahjong/`, deploy `dist/` to Pages. The workflow is copied from Solitaire Dreams.
+- `vite-plugin-pwa` with `registerType: 'prompt'` (see Interaction and lifecycle). It precaches all build assets, including the font.
+- Manifest:
+  - `id`, `start_url`, and `scope` all equal `/Brigitte_80er_Mahjong/`.
+  - Name "Brigittes Mahjong", short name "Mahjong".
+  - `display: fullscreen`, `orientation: landscape`.
+  - Palette colours.
+  - 192/512 px and maskable icons (a cake with "80").
+- GitHub Actions on push to `main`: `npm ci`, `npm test`, `npm run build` with `VITE_BASE=/Brigitte_80er_Mahjong/`, then deploy `dist/` to Pages. Copied from Solitaire Dreams.
 
 ## Testing
 
-Vitest (`core/`, `levels/`, `progress/`, `content`):
+Vitest (`core/`, `levels/`, `progress/`, content):
 
-- `isFree`: covered by an upper layer (full and half-offset overlap); left-only, right-only, and both sides blocked; half-row vertical overlap.
-- Reducer: select, deselect, move the selection, mismatched faces, blocked tap, match removes the pair, undo restores it, undo past a shuffle, shuffle keeps the face multiset, win detection, stuck detection.
-- Deal: the same seed gives the same deal; per-face pair counts differ by ≤ 1; the recorded removal order replays legally to an empty board.
-- **Solvability:** for each of the 6 levels, 200 seeds; the solver confirms every deal is solvable. For each level, 50 seeds × a mid-game `reshuffle` after half the pairs are removed along a random legal path; the solver confirms solvability. The solver is a depth-first search memoized on the removed-slot set. It is independent of `deal.ts` (it never reads the recorded removal order), and it has a budget of 200,000 nodes per board. Exceeding the budget fails the test. The whole solvability suite must finish in ≤ 60 s.
-- Layouts: tile counts and layer counts match the level table; each count is even; board fit at 640×360 gives a tile width ≥ 44 px (see Levels); `clueRect` is fully covered by layer 0; no two slots overlap on the same layer.
-- Content: each clue fits its level's `clueRect` at ≥ 20 px (measured with a fixed-width character model: average glyph width 0.55 em, line height 1.3); no `[Beispiel]` strings remain on a `main` build.
-- Save: round trip; corrupt JSON, wrong shape, and unknown version all give a fresh save.
+- **`isFree`:** covered from above (full and half-offset overlap); left-only, right-only, and both sides blocked; half-row vertical overlap.
+- **Reducer:**
+  - Select, deselect, move the selection, mismatch, blocked tap, and a match removing the pair.
+  - Undo restoring a match exactly.
+  - Two successive undos across a shuffle, restoring the exact pre-shuffle face map.
+  - Shuffle keeping the face multiset.
+  - Win before stuck.
+  - Stuck detection, and the stuck status after undoing a shuffle.
+  - The shuffle counter staying monotonic.
+- **Deal:** the same seed gives the same deal; per-face pair counts differ by ≤ 1; the witness replays legally to an empty board through the reducer.
+- **Certificates:** each layout's `certificate` replays legally on the full layout. `peel(allSlots, …, 1000)` succeeds on 1000 seeds per layout (the fallback exists, but should never be needed).
+- **Recovery (the load-bearing test).** For each level and 200 seeds:
+  1. Play random legal matches.
+  2. Whenever stuck, apply *Mischen* and replay its new witness to confirm legality.
+  3. Continue until the board is won.
 
-**UI smoke (headless Chromium, 800×360 landscape):**
-- Welcome → map → level 1.
-- Complete the tutorial.
-- Play level 1 to the win using the hint pairs.
-- The letter shows clue 1.
-- The map shows candle 1 lit.
-- Force a stuck state, and Shuffle resolves it.
-- Level 6 finale renders the photo.
-- The service worker registers and the game reloads offline.
-- Screenshots of each screen are saved for Jay.
+  A run must win within 100 shuffles. Stuck states at any depth count, including early ones, and none are discarded.
+- **Relocation fixture:** the review's stacked-twin tail (Appendix A). *Mischen* must relocate, and the result must replay to a win.
+- **Oracle:** `solver.ts` (exhaustive DFS) confirms the recovery outcomes on small hand-made fixtures of ≤ 16 tiles. It is not run on full boards.
+- **Layouts:**
+  - Counts per the level table, all even.
+  - No overlapping slots on the same layer.
+  - The layer-0 bounding box is ≤ 11×5.
+  - The fit at 640×360 gives w ≥ 44.
+  - `clueRect` lies inside the inset layer-0 union.
+- **Content:** the clue lint (see Clue under the tiles); no `[Beispiel]` strings.
+- **Save:** round trip; corrupt JSON, wrong shape, and unknown version all give a fresh save; the attempt counter is saved on entry, so enter → abandon → reload → re-enter gives a different seed.
 
-**Performance check:** the Budget above, recorded in the merge report with trace numbers.
+**UI smoke** (headless Chromium, 640×360 and 800×360 landscape, fonts ready). Screenshots of each screen are saved for Jay.
+- The welcome renders in portrait and in landscape.
+- The tutorial, played without mistakes, completes and saves `tutorialDone`.
+- Level 1 played to the win via hints; the letter shows "Hinweis 1 von 6"; the map shows candle 1 lit and candle 2 pulsing.
+- Every level's clue paper fits at ≥ 24 px with no overflow (fit acceptance).
+- A forced stuck state: *Mischen* resolves it; *Letztes Paar zurück* works; shuffle → undo does not trap.
+- A rapid match then an immediate *Zurück*, and Back during the last pair's flight, leave the board and the save consistent.
+- Level 6's win leads to the closing screen listing all six clues.
+- The service worker registers, and the game reloads offline.
+
+**Performance check:** the Budget, recorded in the merge report.
+
+## Scope cuts (only with Jay's explicit approval, in this order)
+
+1. The envelope-flap choreography, the fireworks, and the candle-light burst are replaced by simple fades and the confetti.
+2. The bespoke shapes (bow, flower, balloons) become roomy rectangles or pyramids. The "80" stays.
+3. Decorative runtime work is replaced with static art where measurements show a cost.
+
+Never cut: recovery (*Mischen* with relocation), cross-shuffle Undo, the stuck dialog's Undo route, readable sizes, the 640×360 fit, the offline installed check on a real phone, and the family content.
 
 ## Success criteria
 
-- Brigitte opens the link on her Android phone, installs the game from the in-app guidance, and it launches fullscreen in landscape.
-- All 6 levels deal solvable boards, unlock in order, reveal their clue under the tiles and on a letter, and level 6 reveals the Gmunden photo and the present text.
-- It meets the Performance budget, and it looks like a finished, polished game on first launch.
-- `npm test` passes, including the per-level solvability tests.
+- Brigitte opens the link on her Android phone, installs the game using the in-app help or the family's instructions, and it launches from the icon fullscreen in landscape.
+- All 6 levels deal solvable boards and unlock in order. *Mischen* always leads to a finishable board. Each level reveals its clue under the tiles and on a letter, and level 6 leads to the closing screen.
+- It meets the Performance budget, including the physical-phone check, and looks like a finished, polished game on first launch.
+- `npm test` passes, including the recovery test.
