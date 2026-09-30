@@ -8,7 +8,7 @@
  * that pre-bake takes it over and finishes it at once.
  */
 import { faceCorner, faceFile, type FaceId } from '../core/tiles';
-import { cellSize, drawBlankFrame, drawTile, DISPLAY_FONT } from './art/tileArt';
+import { cellSize, drawBlankFrame, drawTileBody, drawTileFace, DISPLAY_FONT } from './art/tileArt';
 
 export interface Atlas {
   url: string;
@@ -69,11 +69,43 @@ export function atlasSize(a: Pick<Atlas, 'cols' | 'cellW' | 'cellH' | 'index'>):
 
 /** How a bake paces itself. */
 export interface BakeJob {
-  /** Resolves when the next short step may run: at once for a waiting level, else in idle time. Rejects when a pre-bake is dropped. */
-  step(): Promise<void>;
+  /**
+   * Resolves when the next short step may run: at once for a waiting level, else in an idle period
+   * with at least `needMs` to spare. Rejects when a pre-bake is dropped.
+   */
+  step(needMs?: number): Promise<void>;
   /** A level waits for this atlas: no more idle pacing. */
   readonly urgent: boolean;
 }
+
+/** Idle time a step asks for beyond its slowest recent duration. */
+export const STEP_MARGIN_MS = 1;
+/** How many of the latest step durations the estimate keeps: enough to span the dearer face SVGs. */
+export const RECENT_STEPS = 8;
+
+/**
+ * The idle time the next step of one kind needs: the slowest of the recent steps plus a margin.
+ * `seedMs` stands in for a measured step until RECENT_STEPS real ones have displaced it.
+ */
+export function createStepEstimate(seedMs: number): { readonly need: number; record(ms: number): void } {
+  const recent = [seedMs];
+  return {
+    get need() {
+      return Math.max(...recent) + STEP_MARGIN_MS;
+    },
+    record(ms) {
+      recent.push(ms);
+      if (recent.length > RECENT_STEPS) recent.shift();
+    },
+  };
+}
+
+/**
+ * Pass steps before any is measured. At 4× CPU throttle a body pass takes 3–4 ms and a face pass
+ * 1.5–5 ms, depending on the face's SVG; the atlas's first face pass about 6 ms.
+ */
+const BODY_SEED_MS = 6;
+const FACE_SEED_MS = 6;
 
 const DROPPED = 'atlas pre-bake dropped';
 
@@ -85,7 +117,6 @@ interface DrawnAtlas {
 
 /** Draws `faces` at face width `w` (CSS px) and `dpr` into one bitmap and exports it as a PNG. */
 async function draw(faces: readonly FaceId[], w: number, dpr: number, job: BakeJob): Promise<DrawnAtlas> {
-  await job.step();
   await document.fonts.load(`700 ${Math.round(w * 0.34)}px ${DISPLAY_FONT}`);
   const size = cellSize(w);
   const index = new Map<FaceId, number>();
@@ -100,30 +131,50 @@ async function draw(faces: readonly FaceId[], w: number, dpr: number, job: BakeJ
   const px = atlasSize(layout);
   const canvas = document.createElement('canvas');
   try {
+    // Setting up the bitmap (megabytes at DPR 3) is a step of its own, apart from the first cell.
+    await job.step();
     canvas.width = px.w;
     canvas.height = px.h;
-    // A CPU-backed canvas: a one-pixel read rasterises the cell just drawn, so a pre-bake spreads the
-    // raster work over its idle steps instead of paying for all of it at once in toBlob.
+    // A CPU-backed canvas: a one-pixel read rasterises what was just drawn, so a pre-bake spreads the
+    // raster work over its idle steps instead of paying for all of it at once in toBlob. The first
+    // draw call allocates the backing store (a read does not), so a no-op clear does it here.
     const ctx = canvas.getContext('2d', { willReadFrequently: true })!;
-    // Pre-baking, each idle step draws one face and requests the next, so every SVG parses in its own
-    // short task between frames. A level waiting for the atlas requests all remaining faces at once.
+    if (!job.urgent) ctx.clearRect(0, 0, 1, 1);
+    // Pre-baking, each cell is two steps, its body pass and then its face pass, and each waits for an
+    // idle period long enough for the slowest recent step of its kind.
+    const bodySteps = createStepEstimate(BODY_SEED_MS);
+    const faceSteps = createStepEstimate(FACE_SEED_MS);
+    // Pre-baking, a cell's body step requests the next face but one and its face step the one after,
+    // so faces stay about two cells ahead while every SVG still parses in its own short task. A level
+    // waiting for the atlas requests all remaining faces at once.
     let requested = 0;
     const request = (n: number): void => {
       for (; requested < Math.min(n, faces.length); requested++) void faceImage(faces[requested]).catch(() => {});
     };
-    for (let i = 0; i < faces.length; i++) {
-      request(job.urgent ? faces.length : i + 1);
-      const image = await faceImage(faces[i]);
-      await job.step();
-      request(job.urgent ? faces.length : i + 2);
-      const f = faces[i];
+    /** One pass over cell `i`: runs `paint` at the cell's origin, flushes it and times it (pre-baking). */
+    const pass = async (i: number, estimate: typeof bodySteps, lead: number, paint: () => void): Promise<void> => {
+      await job.step(estimate.need);
+      const start = performance.now();
+      request(job.urgent ? faces.length : i + lead);
       const o = cellOrigin(layout, i);
       ctx.setTransform(1, 0, 0, 1, o.x, o.y);
-      drawTile(ctx, image, faceCorner(f), w, dpr);
-      if (f === HAKU) drawBlankFrame(ctx, w, dpr);
-      if (!job.urgent) ctx.getImageData(o.x, o.y, 1, 1);
+      paint();
+      if (!job.urgent) {
+        ctx.getImageData(o.x, o.y, 1, 1);
+        estimate.record(performance.now() - start);
+      }
+    };
+    for (let i = 0; i < faces.length; i++) {
+      const f = faces[i];
+      request(job.urgent ? faces.length : i + 1);
+      await pass(i, bodySteps, 2, () => drawTileBody(ctx, w, dpr));
+      const image = await faceImage(f);
+      await pass(i, faceSteps, 3, () => {
+        drawTileFace(ctx, image, faceCorner(f), w, dpr);
+        if (f === HAKU) drawBlankFrame(ctx, w, dpr);
+      });
     }
-    await job.step();
+    await job.step(Math.max(bodySteps.need, faceSteps.need));
     const blob = await new Promise<Blob>((resolve, reject) =>
       canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('atlas toBlob failed'))), 'image/png'),
     );
@@ -152,8 +203,8 @@ export interface AtlasCacheDeps<D> {
   draw(faces: readonly FaceId[], w: number, dpr: number, job: BakeJob): Promise<D>;
   load(drawn: D): Promise<Atlas>;
   revoke(a: Atlas): void;
-  /** Runs `cb` once the page is idle; returns a cancel function. */
-  idle(cb: () => void): () => void;
+  /** Runs `cb` once the page is idle with at least `needMs` to spare (a default when omitted); returns a cancel function. */
+  idle(cb: () => void, needMs?: number): () => void;
 }
 
 export interface AtlasCache {
@@ -203,7 +254,7 @@ export function createAtlasCache<D>(deps: AtlasCacheDeps<D>, spare = 1): AtlasCa
       get urgent() {
         return e.urgent;
       },
-      step() {
+      step(needMs) {
         // A level acquires by setting `urgent`, so a dropped bake it took over (even in the same task as the cancel) runs on.
         if (e.urgent) return Promise.resolve();
         if (e.dropped) return Promise.reject(new DOMException(DROPPED, 'AbortError'));
@@ -213,7 +264,7 @@ export function createAtlasCache<D>(deps: AtlasCacheDeps<D>, spare = 1): AtlasCa
           if (e.urgent || !e.dropped) resolve();
           else reject(new DOMException(DROPPED, 'AbortError'));
         };
-        const cancelIdle = deps.idle(done);
+        const cancelIdle = deps.idle(done, needMs);
         e.wake = () => {
           cancelIdle();
           queueMicrotask(done);
@@ -293,19 +344,21 @@ export function createAtlasCache<D>(deps: AtlasCacheDeps<D>, spare = 1): AtlasCa
   };
 }
 
-/**
- * Idle periods shorter than this wait for the next one. A pre-bake step (one cell) takes 5–9 ms at 4×
- * CPU throttle; a 75 Hz display leaves idle periods of about 9 ms beside the map's ambient animation.
- */
+/** The idle time a step asks for unless it says otherwise: starting a pre-bake, setting up its bitmap, decoding its export. */
 const MIN_IDLE_MS = 6;
 
+/** The latest idle period handed out; its timeRemaining() is 0 once it is over. */
+let period: IdleDeadline | null = null;
+
 /**
- * Runs `cb` in an idle period with at least MIN_IDLE_MS to spare. While the page is hidden it holds,
- * listening for `visibilitychange` only until visible again, then waits for idle anew. Returns a cancel.
+ * Runs `cb` in an idle period with at least `needMs` to spare: the current one if it still has that
+ * much left, else the next one that does. While the page is hidden it holds, listening for
+ * `visibilitychange` only until visible again, then waits for idle anew. Returns a cancel.
  */
-export function whenIdle(cb: () => void): () => void {
+export function whenIdle(cb: () => void, needMs = MIN_IDLE_MS): () => void {
   let idleId = 0;
   let timer = 0;
+  let cancelled = false;
   const onVisibility = (): void => {
     if (document.visibilityState === 'hidden') return;
     document.removeEventListener('visibilitychange', onVisibility);
@@ -313,16 +366,22 @@ export function whenIdle(cb: () => void): () => void {
   };
   const tick = (d?: IdleDeadline): void => {
     idleId = timer = 0;
+    if (d !== undefined) period = d;
     if (document.visibilityState === 'hidden') document.addEventListener('visibilitychange', onVisibility);
-    else if (d !== undefined && d.timeRemaining() < MIN_IDLE_MS) request();
+    else if (d !== undefined && d.timeRemaining() < needMs) request();
     else cb();
   };
   const request = (): void => {
     if (typeof requestIdleCallback === 'function') idleId = requestIdleCallback(tick);
     else timer = window.setTimeout(tick, 50);
   };
-  request();
+  if (period !== null && document.visibilityState !== 'hidden' && period.timeRemaining() >= needMs) {
+    queueMicrotask(() => {
+      if (!cancelled) cb();
+    });
+  } else request();
   return () => {
+    cancelled = true;
     if (idleId !== 0) cancelIdleCallback(idleId);
     if (timer !== 0) clearTimeout(timer);
     document.removeEventListener('visibilitychange', onVisibility);

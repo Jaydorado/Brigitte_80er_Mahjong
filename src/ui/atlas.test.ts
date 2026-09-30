@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createAtlasCache, whenIdle, type Atlas, type AtlasCacheDeps } from './atlas';
+import { createAtlasCache, createStepEstimate, RECENT_STEPS, STEP_MARGIN_MS, whenIdle, type Atlas, type AtlasCacheDeps } from './atlas';
 
 const FACES = [0, 1, 2];
 const STEPS = 3;
@@ -204,11 +204,13 @@ describe('whenIdle', () => {
   const listeners = new Set<() => void>();
   const idleCallbacks = new Map<number, IdleRequestCallback>();
   let nextId = 1;
-  /** One idle period with `ms` to spare: every callback requested so far runs. */
+  /** One idle period with `ms` to spare: every callback requested so far runs. The period is over once they return. */
   const idlePeriod = (ms = 50): void => {
     const due = [...idleCallbacks.values()];
     idleCallbacks.clear();
-    for (const cb of due) cb({ didTimeout: false, timeRemaining: () => ms });
+    let open = true;
+    for (const cb of due) cb({ didTimeout: false, timeRemaining: () => (open ? ms : 0) });
+    open = false;
   };
   const setVisibility = (v: DocumentVisibilityState): void => {
     visibility = v;
@@ -234,6 +236,40 @@ describe('whenIdle', () => {
   });
   afterEach(() => vi.unstubAllGlobals());
 
+  it('runs only in an idle period with at least the time asked for; shorter ones wait for the next', () => {
+    const cb = vi.fn();
+    whenIdle(cb, 8);
+    idlePeriod(7.9);
+    idlePeriod(4);
+    expect(cb).not.toHaveBeenCalled();
+    idlePeriod(8);
+    expect(cb).toHaveBeenCalledTimes(1);
+  });
+
+  it('a step asked for while an idle period still has room for it runs in that period; one needing more waits for the next', async () => {
+    let left = 10;
+    const second = vi.fn();
+    const third = vi.fn();
+    const dropped = vi.fn();
+    whenIdle(() => {
+      left = 5;
+      whenIdle(second, 4);
+      whenIdle(third, 6);
+      whenIdle(dropped, 4)();
+    }, 8);
+    const [first] = [...idleCallbacks.values()];
+    idleCallbacks.clear();
+    first({ didTimeout: false, timeRemaining: () => left });
+    await Promise.resolve();
+    expect(second).toHaveBeenCalledTimes(1);
+    expect(third).not.toHaveBeenCalled();
+    expect(dropped).not.toHaveBeenCalled();
+    left = 0; // that period is over
+    idlePeriod(6);
+    expect(third).toHaveBeenCalledTimes(1);
+    expect(dropped).not.toHaveBeenCalled();
+  });
+
   it('runs no step while the page is hidden and resumes once it is visible again', () => {
     const cb = vi.fn();
     whenIdle(cb);
@@ -258,5 +294,32 @@ describe('whenIdle', () => {
     setVisibility('visible');
     idlePeriod();
     expect(cb).not.toHaveBeenCalled();
+  });
+});
+
+describe('step estimate', () => {
+  it('asks for the seed plus a margin before any step is measured', () => {
+    expect(createStepEstimate(6).need).toBe(6 + STEP_MARGIN_MS);
+  });
+
+  it('asks for the slowest recent step plus a margin, so one fast step does not hide a slow one', () => {
+    const e = createStepEstimate(1);
+    e.record(3);
+    e.record(5);
+    e.record(2);
+    expect(e.need).toBe(5 + STEP_MARGIN_MS);
+  });
+
+  it('keeps the seed until measured steps displace it, then forgets a slow step after RECENT_STEPS faster ones', () => {
+    const e = createStepEstimate(6);
+    for (let i = 0; i < RECENT_STEPS - 1; i++) e.record(2);
+    expect(e.need).toBe(6 + STEP_MARGIN_MS); // the seed is still among the recent steps
+    e.record(2);
+    expect(e.need).toBe(2 + STEP_MARGIN_MS);
+    e.record(9);
+    for (let i = 0; i < RECENT_STEPS - 1; i++) e.record(3);
+    expect(e.need).toBe(9 + STEP_MARGIN_MS);
+    e.record(3);
+    expect(e.need).toBe(3 + STEP_MARGIN_MS);
   });
 });

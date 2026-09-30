@@ -23,24 +23,29 @@ export function cellSize(w: number): { w: number; h: number } {
   return { w: w * (1 + TILE.edge + TILE.shadow), h: w * (TILE.aspect + TILE.edge + TILE.shadow) };
 }
 
-/**
- * Draws one tile with its face's top-left at the context's current origin (device px). All
- * geometry is in CSS px scaled by dpr; canvas shadows are in device px, so they scale by hand.
- */
-export function drawTile(
-  ctx: CanvasRenderingContext2D, face: HTMLImageElement, corner: string, w: number, dpr: number,
-): void {
-  const h = w * TILE.aspect;
-  const e = w * TILE.edge;
-  const r = w * 0.12;
+/** Saves the context, scales it to CSS px and clips to the cell; pair with `ctx.restore()`. */
+function enterCell(ctx: CanvasRenderingContext2D, w: number, dpr: number): void {
   const cell = cellSize(w);
-  const px = 1 / dpr; // one device pixel in CSS px
-
   ctx.save();
   ctx.scale(dpr, dpr);
   ctx.beginPath();
   ctx.rect(0, 0, cell.w, cell.h);
   ctx.clip();
+}
+
+/**
+ * A tile is drawn in two passes, with its face's top-left at the context's current origin (device
+ * px): this one, the shadow, jade edge and ivory face, then `drawTileFace` over it. The passes may
+ * run in separate tasks; together they paint exactly what one pass would. All geometry is in CSS px
+ * scaled by dpr; canvas shadows are in device px, so they scale by hand.
+ */
+export function drawTileBody(ctx: CanvasRenderingContext2D, w: number, dpr: number): void {
+  const h = w * TILE.aspect;
+  const e = w * TILE.edge;
+  const r = w * 0.12;
+  const px = 1 / dpr; // one device pixel in CSS px
+
+  enterCell(ctx, w, dpr);
 
   // 1. The baked soft shadow, cast by the tile body onto the table, down and right.
   ctx.save();
@@ -108,6 +113,16 @@ export function drawTile(
   ctx.roundRect(px / 2, px / 2, w - px, h - px, r);
   ctx.stroke();
 
+  ctx.restore();
+}
+
+/** The tile's second pass (see drawTileBody): its face art and corner mark. */
+export function drawTileFace(
+  ctx: CanvasRenderingContext2D, face: HTMLImageElement, corner: string, w: number, dpr: number,
+): void {
+  const h = w * TILE.aspect;
+  enterCell(ctx, w, dpr);
+
   // 4. The face art, centred at 78% of the face, keeping its own aspect.
   const boxW = w * 0.78;
   const boxH = h * 0.78;
@@ -137,7 +152,7 @@ export function drawTile(
 
 /**
  * The white dragon's frame. The vendor Haku art is empty, and a blank face reads as a missing tile,
- * so the atlas adds the classic blue double frame on top of drawTile for that face.
+ * so the atlas adds the classic blue double frame on top of the tile's face pass.
  */
 export function drawBlankFrame(ctx: CanvasRenderingContext2D, w: number, dpr: number): void {
   const h = w * TILE.aspect;
