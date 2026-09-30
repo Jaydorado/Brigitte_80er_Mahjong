@@ -2,3 +2,7 @@ node_modules/
 dist/
 dev-dist/
 .superpowers/
+dist-smoke/
+smoke/screenshots/
+test-results/
+playwright-report/
