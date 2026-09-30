@@ -21,7 +21,7 @@
 - Animations only on `transform`/`opacity` (WAAPI or CSS), plus canvas drawing. No CSS `filter`, `box-shadow`, or `backdrop-filter` on tiles. No `will-change` or 3D on resting tiles. No ambient animation behind a level.
 - Palette: `#FFF8EE` cream, `#D9B26F` gold, `#E89AA8` rose, `#8E2F4F` berry, `#3A1F2B` plum text.
 - Save key `mahjong80.save`. Base path `/Brigitte_80er_Mahjong/`.
-- No `[Beispiel]` string may reach a `main` deploy (a test enforces this).
+- The family texts ship as warm drafts, and `TEXTS_FINAL = false` in `src/content.ts`. Drafts deploy, so the family can preview and refine them. The release check (`RELEASE=1 npm test`) fails until `TEXTS_FINAL = true`. Brigitte gets the link only after that check passes.
 - The UI respects `prefers-reduced-motion`.
 
 ## Dependency order
@@ -41,7 +41,7 @@ T2–T5 and T6 can run in parallel with each other only where the arrows allow. 
 |File|Task|Responsibility|
 |---|---|---|
 |`package.json`, `tsconfig.json`, `vite.config.ts`, `index.html`, `.github/workflows/deploy.yml`, `public/` icons|T1|build, PWA, CI|
-|`src/content.ts`, `src/content.test.ts`|T1|clues + family texts; placeholder guard|
+|`src/content.ts`, `src/content.test.ts`|T1|clues + family texts; release check|
 |`src/vendor/tiles/*.svg`, `src/vendor/tiles/LICENSE.md`|T1|34 CC0 faces|
 |`src/core/tiles.ts`, `src/core/rng.ts`, `src/core/layout.ts` (+ tests)|T2|faces, PRNG, geometry, `isFree`|
 |`src/core/deal.ts`, `src/core/solver.ts` (+ tests)|T3|peel, deal, shuffle/relocate, fixture oracle|
@@ -108,39 +108,40 @@ T2–T5 and T6 can run in parallel with each other only where the arrows allow. 
 
   export const welcome = {
     title: 'Alles Gute zum 80. Geburtstag, liebe Brigitte!',
-    message: '[Beispiel] Wir haben dir ein kleines Spiel gebaut. In jedem Level wartet ein Hinweis auf dein Geschenk.',
+    message:
+      'Wir haben dir ein kleines Spiel gebaut, ganz für dich allein. In jedem Level versteckt sich unter den Steinen ein Hinweis auf dein Geschenk. Nimm dir Zeit, es gibt keine Eile. Viel Freude beim Rätseln!',
   };
 
-  export const finale = '[Beispiel] Errätst du, was wir vorhaben?';
-  export const credit = '[Beispiel] In Liebe, deine Familie';
+  export const finale =
+    'Du hast alle sechs Hinweise gefunden! Errätst du, was wir gemeinsam vorhaben? Wir freuen uns schon riesig darauf.';
+  export const credit = 'In Liebe, deine Familie';
+
+  // Auf true setzen, sobald die Familie die Texte freigegeben hat. Erst dann bekommt Brigitte den Link.
+  export const TEXTS_FINAL = false;
   ```
-- [ ] **Step 7: failing test `src/content.test.ts`.**
+- [ ] **Step 7: test `src/content.test.ts`.**
 
   ```ts
   import { describe, expect, it } from 'vitest';
-  import { clues, credit, finale, welcome } from './content';
-
-  const all = [...clues, welcome.title, welcome.message, finale, credit];
+  import { clues, credit, finale, TEXTS_FINAL, welcome } from './content';
 
   describe('content', () => {
-    it('has six non-empty clues', () => {
+    it('has six non-empty clues and non-empty texts', () => {
       expect(clues).toHaveLength(6);
-      for (const c of clues) expect(c.trim().length).toBeGreaterThan(0);
+      for (const s of [...clues, welcome.title, welcome.message, finale, credit]) expect(s.trim().length).toBeGreaterThan(0);
     });
-    it('contains no [Beispiel] placeholder', () => {
-      expect(all.filter((s) => s.startsWith('[Beispiel]'))).toEqual([]);
+    it.skipIf(process.env.RELEASE !== '1')('texts are approved by the family (release check)', () => {
+      expect(TEXTS_FINAL).toBe(true);
     });
   });
   ```
 
-  Run `npx vitest run src/content.test.ts`. Expected: the placeholder test FAILS, listing 3 strings. This is intended; it stays red until the family supplies texts. Mark it with `it.skipIf(process.env.ALLOW_PLACEHOLDERS === '1')` so that local development and T2–T10 verification can run `ALLOW_PLACEHOLDERS=1 npm test`.
-
-  The CI workflow does **not** set the variable, so a deploy with placeholders fails, as the spec requires. Also add a `test:dev` script: `cross-env ALLOW_PLACEHOLDERS=1 vitest run`, with `cross-env` as a devDependency (Windows shell).
+  Run `npx vitest run src/content.test.ts`. Expected: 1 passed, 1 skipped. Add a script `"release-check": "cross-env RELEASE=1 vitest run"`, with `cross-env` as a devDependency (Windows shell). CI runs plain `npm test`, so drafts deploy for the family preview.
 - [ ] **Step 8: CI.** Copy `.github/workflows/deploy.yml` from the reference with `VITE_BASE: /Brigitte_80er_Mahjong/`.
 - [ ] **Step 9: placeholder `src/main.ts`** that renders "Brigittes Mahjong" into `#app`, and `src/ui/styles.css` with the palette as CSS custom properties (`--cream`, `--gold`, `--rose`, `--berry`, `--plum`).
 - [ ] **Step 10: verify.**
-  - `npm run test:dev` passes.
-  - `npm test` fails only on the placeholder test.
+  - `npm test` passes.
+  - `npm run release-check` fails only on the release check.
   - `npm run build` succeeds, and `dist/manifest.webmanifest` contains `"display":"fullscreen"`.
 - [ ] **Step 11: commit** `chore: scaffold Brigittes Mahjong (Vite, PWA, CI, CC0 tiles, content)`.
 
@@ -762,7 +763,7 @@ export function markWon(s: SaveV1, levelId: number): SaveV1; // idempotent
   - The clue is invisible at deal and readable after taps remove the covering tiles.
   - Matching by tapping works.
   - The DevTools Layers panel at rest shows ≤ 12 layers.
-- [ ] **Step 3:** `npm run test:dev` and `npm run build` pass.
+- [ ] **Step 3:** `npm test` and `npm run build` pass.
 - [ ] **Step 4: commit** `feat(ui): baked tile atlas, board, HUD, clue paper, level screen`.
 
 ---
@@ -829,7 +830,7 @@ export function markWon(s: SaveV1, levelId: number): SaveV1; // idempotent
   - Back mid-level asks for confirmation.
   - The win persists `won` before confetti ends: reload during confetti, then check localStorage.
 - [ ] **Step 3: perf spot check** at DevTools 4× CPU throttle: during a match there is no long task > 50 ms (a screenshot of the Performance panel summary goes to the SDD folder).
-- [ ] **Step 4:** `npm run test:dev`, `npm run build`.
+- [ ] **Step 4:** `npm test`, `npm run build`.
 - [ ] **Step 5: commit** `feat(ui): match flights, particles, stuck and leave dialogs, lifecycle guards`.
 
 ---
@@ -896,7 +897,7 @@ export function markWon(s: SaveV1, levelId: number): SaveV1; // idempotent
   - Level 6 win → letter → closing with all six clues.
   - The topper reopens closing.
   - Screenshots go to the SDD folder.
-- [ ] **Step 3:** `npm run test:dev`, `npm run build`.
+- [ ] **Step 3:** `npm test`, `npm run build`.
 - [ ] **Step 4: commit** `feat(ui): cake map, welcome and install help, letters, closing screen, router`.
 
 ---
@@ -933,7 +934,7 @@ Steps:
 
 - [ ] **Step 1:** implement.
 - [ ] **Step 2: verify** in a browser at 640×360: follow all steps without mistakes → `tutorialDone` is true in localStorage. Reload → no tutorial. Clear it → start → skip → done. Leave mid-tutorial → it restarts on re-entry. Screenshots of each step.
-- [ ] **Step 3:** `npm run test:dev`, `npm run build`.
+- [ ] **Step 3:** `npm test`, `npm run build`.
 - [ ] **Step 4: commit** `feat(ui): level-1 guided tutorial`.
 
 ---
@@ -961,9 +962,9 @@ Screenshots of every screen → `smoke/screenshots/` (gitignored), attached to t
 - [ ] **Step 1:** implement the smoke suite. `npm run smoke` passes.
 - [ ] **Step 2 (controller):** run the spec's desktop perf protocol and record the numbers in `docs/reports/2026-10-perf.md`: Chrome version, median of 3, fps, long tasks, level-6 start ms, resting layers.
 - [ ] **Step 3 (Jay + controller):**
-  1. Jay enables Pages.
-  2. Replace the three `[Beispiel]` texts with the family's.
-  3. `npm test` (full, no placeholder bypass) passes.
+  1. Pages is already enabled (Jay, 2026-09-30).
+  2. Put the family's final texts into `src/content.ts` and set `TEXTS_FINAL = true`.
+  3. `npm run release-check` passes.
   4. Push `main` → the CI deploys.
 - [ ] **Step 4 (Jay):** on a physical Android phone: open the URL in Chrome → install → launch from the cake icon (fullscreen, landscape) → play level 1 to the win and a few matches on level 6 → airplane mode → relaunch works. Report the phone model and a judgement of smoothness into the perf report.
 - [ ] **Step 5:** adversarial merge pass (`adversary`) on the full diff, report at `docs/reviews/2026-10-0X-mahjong-v1-adversary.md`. Fix the P1s, then send Brigitte the link and the family's install message.
@@ -990,4 +991,4 @@ Screenshots of every screen → `smoke/screenshots/` (gitignored), attached to t
 - **Type names are consistent across tasks:** `Board`, `Pair`, `Layout`, `LayoutIndex`, `GameState`, `GameEvent`, `LevelDef.faces`, `attemptSeed()`, `BoardView`, `Fx`, `BoardAnimator`, `Screen`.
 - **Deviations from the spec:**
   - The spec's `LevelDef.faceCount` is realised as an explicit `faces` list (count = length), per the spec's "faces for levels 1–2 favour dots and winds".
-  - The placeholder test is bypassable locally via `ALLOW_PLACEHOLDERS=1`. CI never sets it.
+  - The family texts ship as drafts; the release gate is `TEXTS_FINAL` + `npm run release-check` (decided by Jay, 2026-09-30), replacing the spec's original `[Beispiel]` CI block.

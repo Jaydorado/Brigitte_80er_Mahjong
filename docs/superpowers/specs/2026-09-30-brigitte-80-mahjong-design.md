@@ -50,12 +50,12 @@ All in `src/content.ts`, editable on GitHub in the browser without touching logi
 
 The longest is 31 characters. "Bezirkschulinspektor" is one 20-character word and sets the minimum paper width.
 
-**Family texts still needed.** Until the family supplies them, they ship as `[Beispiel] …` placeholders:
+**Family texts** ship as warm drafts written by the author, for the family to preview and refine (Jay, 2026-09-30):
 - `welcome`: greeting and a personal message.
-- `finale`: the closing line, e.g. "Errätst du, was wir vorhaben?"
+- `finale`: the closing line.
 - `credit`: sign-off line.
 
-A test fails whenever any content string starts with `[Beispiel]`. CI runs it on every push to `main`, so a build with placeholder text cannot deploy.
+`content.ts` exports `TEXTS_FINAL = false`. Drafts deploy normally. The release check (`npm run release-check`) fails until the family sets `TEXTS_FINAL = true`, and Brigitte gets the link only after it passes.
 
 ## Stack
 
@@ -355,7 +355,7 @@ Vitest (`core/`, `levels/`, `progress/`, content):
   - The layer-0 bounding box is ≤ 11×5.
   - The fit at 640×360 gives w ≥ 44.
   - `clueRect` lies inside the inset layer-0 union.
-- **Content:** the clue lint (see Clue under the tiles); no `[Beispiel]` strings.
+- **Content:** the clue lint (see Clue under the tiles); the release check on `TEXTS_FINAL`.
 - **Save:** round trip; corrupt JSON, wrong shape, and unknown version all give a fresh save; the attempt counter is saved on entry, so enter → abandon → reload → re-enter gives a different seed.
 
 **UI smoke** (headless Chromium, 640×360 and 800×360 landscape, fonts ready). Screenshots of each screen are saved for Jay.
