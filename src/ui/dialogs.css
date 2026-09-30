@@ -1,0 +1,178 @@
+/* Dialogs (stuck, leave level). Open/close animate only transform and opacity (dialogs.ts). */
+
+.dlg-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: grid;
+  place-items: center;
+  box-sizing: border-box;
+  padding: max(12px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right))
+    max(12px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
+  background: rgba(58, 31, 43, 0.5);
+  -webkit-tap-highlight-color: transparent;
+}
+
+.dlg {
+  position: relative;
+  box-sizing: border-box;
+  width: min(540px, 100%);
+  max-height: 100%;
+  overflow: auto;
+  padding: 22px 30px 24px;
+  border: 3px solid var(--gold, #d9b26f);
+  border-radius: 24px;
+  background:
+    radial-gradient(120% 70% at 50% 0%, rgba(217, 178, 111, 0.2), transparent 70%),
+    var(--cream, #fff8ee);
+  box-shadow:
+    inset 0 0 0 5px var(--cream, #fff8ee),
+    inset 0 0 0 6.5px rgba(217, 178, 111, 0.6),
+    0 18px 44px rgba(58, 31, 43, 0.38);
+  color: var(--plum, #3a1f2b);
+  font-size: 20px;
+  line-height: 1.35;
+  text-align: center;
+}
+
+.dlg h2 {
+  margin: 0;
+  color: var(--berry, #8e2f4f);
+  font-family: var(--font-display, Georgia, serif);
+  font-size: 28px;
+  font-weight: 700;
+  line-height: 1.2;
+  text-wrap: balance;
+}
+
+.dlg p {
+  margin: 10px 0 0;
+  font-size: 20px;
+  text-wrap: pretty;
+}
+
+.dlg-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 12px 14px;
+  margin-top: 20px;
+}
+
+.dlg button {
+  font-family: inherit;
+  cursor: pointer;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.dlg button:focus-visible {
+  outline: 3px solid var(--gold, #d9b26f);
+  outline-offset: 3px;
+}
+
+.dlg-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  box-sizing: border-box;
+  min-width: 48px;
+  min-height: 52px;
+  padding: 0 24px;
+  border: 2.5px solid var(--berry, #8e2f4f);
+  border-radius: 999px;
+  background: var(--cream, #fff8ee);
+  color: var(--berry, #8e2f4f);
+  font-size: 21px;
+  font-weight: 600;
+  line-height: 1.1;
+  transition: transform 90ms ease-out;
+}
+
+.dlg-btn.primary {
+  min-height: 56px;
+  padding: 0 30px;
+  background: var(--berry, #8e2f4f);
+  color: var(--cream, #fff8ee);
+  font-size: 22px;
+  box-shadow:
+    0 3px 0 rgba(58, 31, 43, 0.45),
+    inset 0 0 0 2px rgba(217, 178, 111, 0.55);
+}
+
+.dlg-btn:active {
+  transform: scale(0.96);
+}
+
+.dlg-icon {
+  flex: none;
+  width: 24px;
+  height: 24px;
+}
+
+.dlg-close {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  display: grid;
+  place-items: center;
+  width: 48px;
+  height: 48px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--berry, #8e2f4f);
+  font-size: 34px;
+  line-height: 1;
+}
+
+/* Stuck: picture on the left, title and actions on the right (landscape, 360 px tall). */
+.dlg-stuck {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  column-gap: 18px;
+  width: min(680px, 100%);
+  padding: 22px 30px 22px 22px;
+  text-align: left;
+}
+
+.dlg-stuck h2 {
+  padding-right: 28px;
+}
+
+.dlg-stuck .dlg-actions {
+  justify-content: flex-start;
+  margin-top: 18px;
+}
+
+.dlg-art {
+  width: 116px;
+  height: 116px;
+}
+
+.dlg-ornament {
+  display: block;
+  width: 120px;
+  height: 20px;
+  margin: 0 auto 8px;
+}
+
+@media (max-width: 520px) {
+  .dlg-stuck {
+    grid-template-columns: 1fr;
+    text-align: center;
+  }
+
+  .dlg-art {
+    justify-self: center;
+    width: 84px;
+    height: 84px;
+  }
+
+  .dlg-stuck .dlg-actions {
+    justify-content: center;
+  }
+}
