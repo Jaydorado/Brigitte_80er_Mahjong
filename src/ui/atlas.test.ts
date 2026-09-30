@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
-  createAtlasCache, createStepEstimate, RECENT_MS, RECENT_STEPS, SETUP_SEED_MS_PER_MPX, setUpBitmap, STARVED_MS,
-  STEP_MARGIN_MS, whenIdle, type Atlas, type AtlasCacheDeps, type BakeJob,
+  createAtlasCache, createStepEstimate, MIN_IDLE_MS, RECENT_MS, RECENT_STEPS, SETUP_SEED_MS_PER_MPX, setUpBitmap,
+  STARVED_MS, STEP_MARGIN_MS, whenIdle, type Atlas, type AtlasCacheDeps, type BakeJob,
 } from './atlas';
 
 const FACES = [0, 1, 2];
@@ -307,29 +307,47 @@ describe('whenIdle', () => {
     expect(cb).not.toHaveBeenCalled();
   });
 
-  it('a step no idle period has time for runs, once refused for STARVED_MS, in a period as long as the longest it was offered', () => {
+  it('a step no idle period has time for runs, once refused for STARVED_MS, in the next period with at least MIN_IDLE_MS', () => {
     const cb = vi.fn();
     whenIdle(cb, 20);
-    for (let i = 0; clock < STARVED_MS; i++) idlePeriod(i === 3 ? 9 : 7);
-    expect(cb).not.toHaveBeenCalled(); // the 9 ms period came before it was starved
-    idlePeriod(7);
-    idlePeriod(8.9);
+    idlePeriod(9); // longer than any after it
+    while (clock < STARVED_MS) idlePeriod(7);
     expect(cb).not.toHaveBeenCalled();
-    idlePeriod(9);
+    idlePeriod(MIN_IDLE_MS - 0.1);
+    expect(cb).not.toHaveBeenCalled();
+    idlePeriod(MIN_IDLE_MS);
     expect(cb).toHaveBeenCalledTimes(1);
   });
 
-  it('an outlier pass followed by only shorter idle periods still finishes the pre-bake', async () => {
+  it('a step whose need shrinks while it waits runs in the first period with time for the new need', () => {
+    const cb = vi.fn();
+    let need = 21;
+    whenIdle(cb, () => need);
+    idlePeriod(7);
+    expect(cb).not.toHaveBeenCalled();
+    need = 3;
+    idlePeriod(7);
+    expect(cb).toHaveBeenCalledTimes(1);
+  });
+
+  /**
+   * Pre-bakes in 12 passes paced as the atlas paces them (each asks for its kind's current estimate and
+   * records what it took), the second of them an outlier (a GC pause, say) slower than any idle period
+   * after it. `period(n)` is the n-th idle period's length, n counted from the outlier (−1 before it).
+   * Returns the loads once the pre-bake finishes, or after 500 periods.
+   */
+  const outlierPrebake = async (period: (n: number) => number): Promise<string[]> => {
     const loads: string[] = [];
+    let n = -1;
     const cache = createAtlasCache<string>({
-      // Paces its passes as the atlas does: each asks for its kind's estimate and records what it took.
       async draw(_faces, w, dpr, job) {
         const passes = createStepEstimate(2);
         for (let i = 0; i < 12; i++) {
-          await job.step(passes.need);
-          const ms = i === 1 ? 20 : 2; // one pass (a GC pause, say) slower than any idle period the page offers
+          await job.step(() => passes.need);
+          const ms = i === 1 ? 20 : 2;
           clock += ms;
           passes.record(ms);
+          if (i === 1) n = 0;
         }
         return `blob:${w}@${dpr}`;
       },
@@ -341,11 +359,20 @@ describe('whenIdle', () => {
       idle: whenIdle,
     });
     cache.prebake(FACES, () => ({ w: 40, dpr: 3 }));
-    for (let n = 0; n < 200 && loads.length === 0; n++) {
-      idlePeriod(9);
+    for (let k = 0; k < 500 && loads.length === 0; k++) {
+      idlePeriod(period(n));
+      if (n >= 0) n++;
       await settle();
     }
-    expect(loads).toEqual(['blob:40@3']);
+    return loads;
+  };
+
+  it('an outlier pass, then one 9 ms idle period, then only 7 ms ones still finishes the pre-bake', async () => {
+    expect(await outlierPrebake((n) => (n <= 0 ? 9 : 7))).toEqual(['blob:40@3']);
+  });
+
+  it('an outlier pass with only 6 ms idle periods, before and after, still finishes the pre-bake', async () => {
+    expect(await outlierPrebake(() => 6)).toEqual(['blob:40@3']);
   });
 
   describe('bitmap setup', () => {

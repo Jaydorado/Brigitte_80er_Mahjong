@@ -71,9 +71,9 @@ export function atlasSize(a: Pick<Atlas, 'cols' | 'cellW' | 'cellH' | 'index'>):
 export interface BakeJob {
   /**
    * Resolves when the next short step may run: at once for a waiting level, else in an idle period
-   * with at least `needMs` to spare. Rejects when a pre-bake is dropped.
+   * with at least `need` to spare. Rejects when a pre-bake is dropped.
    */
-  step(needMs?: number): Promise<void>;
+  step(need?: IdleNeed): Promise<void>;
   /** A level waits for this atlas: no more idle pacing. */
   readonly urgent: boolean;
 }
@@ -85,7 +85,8 @@ export const RECENT_STEPS = 8;
 /**
  * How long the estimate keeps a step duration. One slow step (a GC pause, say) can ask for more than
  * any idle period the page offers, so no newer step could run to displace it: it is forgotten by
- * age instead. The step waiting behind it runs once starved (STARVED_MS) and then finds it gone.
+ * age instead. The step waiting behind it re-reads the estimate each idle period, so it asks for the
+ * usual time again once the slow one is gone (and settles for less once starved, STARVED_MS).
  */
 export const RECENT_MS = 250;
 
@@ -121,6 +122,9 @@ const FACE_SEED_MS = 8;
 /**
  * Allocating a bitmap's backing store costs in proportion to its pixels: level 6 at DPR 3 (1124×1358,
  * 1.53 Mpx) measured 3.2–4.1 ms at 4× CPU throttle headed (2.1–2.7 ms per million px), 2.9–3.3 headless.
+ * Starved (STARVED_MS), the allocation runs in any idle period with MIN_IDLE_MS, so its overrun is bounded
+ * by the largest atlas: level 6 on a 1480×924 viewport at DPR 3 (2924×3542, 10.4 Mpx, larger than any
+ * Android device bakes) measured at most 20 ms, under a 50 ms long task. It is not split further.
  */
 export const SETUP_SEED_MS_PER_MPX = 3;
 /** The latest pre-bake's measured allocation cost, ms per million px. */
@@ -193,7 +197,7 @@ async function draw(faces: readonly FaceId[], w: number, dpr: number, job: BakeJ
     };
     /** One pass over cell `i`: runs `paint` at the cell's origin, flushes it and times it (pre-baking). */
     const pass = async (i: number, estimate: typeof bodySteps, lead: number, paint: () => void): Promise<void> => {
-      await job.step(estimate.need);
+      await job.step(() => estimate.need);
       const start = performance.now();
       request(job.urgent ? faces.length : i + lead);
       const o = cellOrigin(layout, i);
@@ -214,7 +218,7 @@ async function draw(faces: readonly FaceId[], w: number, dpr: number, job: BakeJ
         if (f === HAKU) drawBlankFrame(ctx, w, dpr);
       });
     }
-    await job.step(Math.max(bodySteps.need, faceSteps.need));
+    await job.step(() => Math.max(bodySteps.need, faceSteps.need));
     const blob = await new Promise<Blob>((resolve, reject) =>
       canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('atlas toBlob failed'))), 'image/png'),
     );
@@ -243,8 +247,8 @@ export interface AtlasCacheDeps<D> {
   draw(faces: readonly FaceId[], w: number, dpr: number, job: BakeJob): Promise<D>;
   load(drawn: D): Promise<Atlas>;
   revoke(a: Atlas): void;
-  /** Runs `cb` once the page is idle with at least `needMs` to spare (a default when omitted); returns a cancel function. */
-  idle(cb: () => void, needMs?: number): () => void;
+  /** Runs `cb` once the page is idle with at least `need` to spare (a default when omitted); returns a cancel function. */
+  idle(cb: () => void, need?: IdleNeed): () => void;
 }
 
 export interface AtlasCache {
@@ -294,7 +298,7 @@ export function createAtlasCache<D>(deps: AtlasCacheDeps<D>, spare = 1): AtlasCa
       get urgent() {
         return e.urgent;
       },
-      step(needMs) {
+      step(need) {
         // A level acquires by setting `urgent`, so a dropped bake it took over (even in the same task as the cancel) runs on.
         if (e.urgent) return Promise.resolve();
         if (e.dropped) return Promise.reject(new DOMException(DROPPED, 'AbortError'));
@@ -304,7 +308,7 @@ export function createAtlasCache<D>(deps: AtlasCacheDeps<D>, spare = 1): AtlasCa
           if (e.urgent || !e.dropped) resolve();
           else reject(new DOMException(DROPPED, 'AbortError'));
         };
-        const cancelIdle = deps.idle(done, needMs);
+        const cancelIdle = deps.idle(done, need);
         e.wake = () => {
           cancelIdle();
           queueMicrotask(done);
@@ -385,45 +389,45 @@ export function createAtlasCache<D>(deps: AtlasCacheDeps<D>, spare = 1): AtlasCa
 }
 
 /** The idle time a step asks for unless it says otherwise: starting a pre-bake, opening its context, decoding its export. */
-const MIN_IDLE_MS = 6;
+export const MIN_IDLE_MS = 6;
 
 /**
- * How long a step waits for an idle period with the time it asks for before it settles for the longest
- * period offered meanwhile. A step that asks for more than this page ever offers (an estimate or budget
- * above a fast display's idle periods) would otherwise stall the pre-bake for good. Long enough that a
- * short run of busy frames, whose idle periods are all short, does not lower the bar.
+ * How long a step waits for an idle period with the time it asks for before it settles for any period
+ * with MIN_IDLE_MS. A step that asks for more than this page offers (an estimate or budget above a fast
+ * display's idle periods) would otherwise stall the pre-bake for good. Long enough that a short run of
+ * busy frames, whose idle periods are all short, does not lower the bar, and that a slow step behind the
+ * estimate (RECENT_MS) has aged out by then.
  */
 export const STARVED_MS = 250;
+
+/** The idle time a step needs, ms: fixed, or re-read each idle period (an estimate that may change meanwhile). */
+export type IdleNeed = number | (() => number);
 
 /** The latest idle period handed out; its timeRemaining() is 0 once it is over. */
 let period: IdleDeadline | null = null;
 
 /**
- * Runs `cb` in an idle period with at least `needMs` to spare: the current one if it still has that
- * much left, else the next one that does, or once refused for STARVED_MS, the next one as long as the
- * longest refused. While the page is hidden it holds, listening for `visibilitychange` only until
- * visible again, then waits for idle anew. Returns a cancel.
+ * Runs `cb` in an idle period with at least `need` to spare: the current one if it still has that much
+ * left, else the next one that does, or once refused for STARVED_MS, the next one with MIN_IDLE_MS.
+ * While the page is hidden it holds, listening for `visibilitychange` only until visible again, then
+ * waits for idle anew. Returns a cancel.
  */
-export function whenIdle(cb: () => void, needMs = MIN_IDLE_MS): () => void {
+export function whenIdle(cb: () => void, need: IdleNeed = MIN_IDLE_MS): () => void {
   let idleId = 0;
   let timer = 0;
   let cancelled = false;
   // Starvation is measured from when the wait began or the page became visible again.
   let since = performance.now();
-  let longest = -1; // the longest idle period refused, ms; none yet
   const onVisibility = (): void => {
     if (document.visibilityState === 'hidden') return;
     document.removeEventListener('visibilitychange', onVisibility);
     since = performance.now();
-    longest = -1;
     request();
   };
   const admits = (d: IdleDeadline): boolean => {
     const left = d.timeRemaining();
-    const starved = longest >= 0 && performance.now() - since >= STARVED_MS;
-    if (left >= (starved ? Math.min(needMs, longest) : needMs)) return true;
-    longest = Math.max(longest, left);
-    return false;
+    if (left >= (typeof need === 'number' ? need : need())) return true;
+    return left >= MIN_IDLE_MS && performance.now() - since >= STARVED_MS;
   };
   const tick = (d?: IdleDeadline): void => {
     idleId = timer = 0;
@@ -436,7 +440,7 @@ export function whenIdle(cb: () => void, needMs = MIN_IDLE_MS): () => void {
     if (typeof requestIdleCallback === 'function') idleId = requestIdleCallback(tick);
     else timer = window.setTimeout(tick, 50);
   };
-  if (period !== null && document.visibilityState !== 'hidden' && period.timeRemaining() >= needMs) {
+  if (period !== null && document.visibilityState !== 'hidden' && period.timeRemaining() >= (typeof need === 'number' ? need : need())) {
     queueMicrotask(() => {
       if (!cancelled) cb();
     });
