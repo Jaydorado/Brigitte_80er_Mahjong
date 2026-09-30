@@ -73,17 +73,18 @@ export interface BakeJob {
   step(): Promise<void>;
   /** A level waits for this atlas: no more idle pacing. */
   readonly urgent: boolean;
-  /** A pre-bake nobody took over was cancelled: stop at the next check, keep nothing. */
-  readonly dropped: boolean;
 }
 
 const DROPPED = 'atlas pre-bake dropped';
 
-/**
- * Bakes `faces` at face width `w` (CSS px) and `dpr`. Resolves once the atlas image itself is
- * decoded, so tiles that use the URL paint on the next frame.
- */
-async function bake(faces: readonly FaceId[], w: number, dpr: number, job: BakeJob): Promise<Atlas> {
+/** A drawn atlas: its layout and exported PNG, not yet decoded. */
+interface DrawnAtlas {
+  layout: Omit<Atlas, 'url' | 'image'>;
+  blob: Blob;
+}
+
+/** Draws `faces` at face width `w` (CSS px) and `dpr` into one bitmap and exports it as a PNG. */
+async function draw(faces: readonly FaceId[], w: number, dpr: number, job: BakeJob): Promise<DrawnAtlas> {
   // Pre-baking: one face request per idle step (each SVG then parses in its own short task).
   for (const f of faces) {
     if (job.urgent) break;
@@ -106,7 +107,6 @@ async function bake(faces: readonly FaceId[], w: number, dpr: number, job: BakeJ
   };
   const px = atlasSize(layout);
   const canvas = document.createElement('canvas');
-  let blob: Blob;
   try {
     canvas.width = px.w;
     canvas.height = px.h;
@@ -123,13 +123,17 @@ async function bake(faces: readonly FaceId[], w: number, dpr: number, job: BakeJ
       if (!job.urgent) ctx.getImageData(o.x, o.y, 1, 1);
     }
     await job.step();
-    blob = await new Promise<Blob>((resolve, reject) =>
+    const blob = await new Promise<Blob>((resolve, reject) =>
       canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('atlas toBlob failed'))), 'image/png'),
     );
-    if (job.dropped) throw new DOMException(DROPPED, 'AbortError'); // cancelled during the export: skip the decode
+    return { layout, blob };
   } finally {
     canvas.width = canvas.height = 0; // drop the backing store now, not at GC
   }
+}
+
+/** Decodes a drawn atlas behind a blob URL, so tiles that use the URL paint on the next frame. */
+async function load({ layout, blob }: DrawnAtlas): Promise<Atlas> {
   const url = URL.createObjectURL(blob);
   const img = new Image();
   img.src = url;
@@ -142,8 +146,10 @@ async function bake(faces: readonly FaceId[], w: number, dpr: number, job: BakeJ
   return { ...layout, url, image: img };
 }
 
-export interface AtlasCacheDeps {
-  bake(faces: readonly FaceId[], w: number, dpr: number, job: BakeJob): Promise<Atlas>;
+/** `D` is a drawn, not yet decoded atlas. */
+export interface AtlasCacheDeps<D> {
+  draw(faces: readonly FaceId[], w: number, dpr: number, job: BakeJob): Promise<D>;
+  load(drawn: D): Promise<Atlas>;
   revoke(a: Atlas): void;
   /** Runs `cb` once the page is idle; returns a cancel function. */
   idle(cb: () => void): () => void;
@@ -165,7 +171,7 @@ export interface AtlasCache {
  * The atlas cache. Atlases in use are never evicted; of the unused ones, only the `spare` most
  * recently used stay (their blob URLs revoked on eviction).
  */
-export function createAtlasCache(deps: AtlasCacheDeps, spare = 1): AtlasCache {
+export function createAtlasCache<D>(deps: AtlasCacheDeps<D>, spare = 1): AtlasCache {
   interface Entry {
     key: string;
     promise: Promise<Atlas>;
@@ -196,9 +202,6 @@ export function createAtlasCache(deps: AtlasCacheDeps, spare = 1): AtlasCache {
       get urgent() {
         return e.urgent;
       },
-      get dropped() {
-        return e.dropped && !e.urgent;
-      },
       step() {
         // A level acquires by setting `urgent`, so a dropped bake it took over (even in the same task as the cancel) runs on.
         if (e.urgent) return Promise.resolve();
@@ -219,10 +222,16 @@ export function createAtlasCache(deps: AtlasCacheDeps, spare = 1): AtlasCache {
     };
     entries.set(key, e);
     e.promise = deps
-      .bake(faces, w, dpr, job)
+      .draw(faces, w, dpr, job)
+      .then(async (drawn) => {
+        // Exported: one more step before the blob URL and decode, so a hidden page holds here too and a
+        // pre-bake dropped during the export stops without decoding.
+        await job.step();
+        return deps.load(drawn);
+      })
       .then((a) => {
-        if (job.dropped) {
-          // Cancelled after its last step (during the export or decode): never cached, so no spare is evicted for it.
+        if (e.dropped && !e.urgent) {
+          // Cancelled during the decode: never cached, so no spare is evicted for it.
           deps.revoke(a);
           throw new DOMException(DROPPED, 'AbortError');
         }
@@ -316,7 +325,7 @@ export function whenIdle(cb: () => void): () => void {
   };
 }
 
-const cache = createAtlasCache({ bake, revoke: (a) => URL.revokeObjectURL(a.url), idle: whenIdle });
+const cache = createAtlasCache({ draw, load, revoke: (a) => URL.revokeObjectURL(a.url), idle: whenIdle });
 
 /** The atlas for `faces` at face width `w` (CSS px) and `dpr`, decoded and ready to paint. Pair with `releaseAtlas`. */
 export function bakeAtlas(faces: readonly FaceId[], w: number, dpr: number): Promise<Atlas> {

@@ -10,20 +10,28 @@ async function settle(): Promise<void> {
 }
 
 /**
- * A cache whose bakes take STEPS paced steps, with idle time handed out by the test. While `exporting`
- * is set, a bake that has taken its last step waits on it (the canvas export and image decode).
+ * A cache whose bakes draw in STEPS paced steps, with idle time handed out by the test. While
+ * `exporting` is set, a draw that has taken its last step waits on it (the canvas export); while
+ * `decoding` is set, the load waits on it (the blob URL's image decode).
  */
 function harness() {
   const idleQueue: (() => void)[] = [];
   const bakes: { w: number; dpr: number }[] = [];
+  const loads: string[] = [];
   const revoked: Atlas[] = [];
   let exporting: PromiseWithResolvers<void> | null = null;
-  const deps: AtlasCacheDeps = {
-    async bake(_faces, w, dpr, job) {
+  let decoding: PromiseWithResolvers<void> | null = null;
+  const deps: AtlasCacheDeps<string> = {
+    async draw(_faces, w, dpr, job) {
       bakes.push({ w, dpr });
       for (let i = 0; i < STEPS; i++) await job.step();
       await exporting?.promise;
-      return { url: `blob:${w}@${dpr}#${bakes.length}`, w, dpr } as unknown as Atlas;
+      return `blob:${w}@${dpr}#${bakes.length}`;
+    },
+    async load(url) {
+      loads.push(url);
+      await decoding?.promise;
+      return { url } as unknown as Atlas;
     },
     revoke: (a) => revoked.push(a),
     idle(cb) {
@@ -43,8 +51,9 @@ function harness() {
       cb();
     }
   };
-  const hold = (): PromiseWithResolvers<void> => (exporting = Promise.withResolvers<void>());
-  return { cache: createAtlasCache(deps), bakes, revoked, idle, idleQueue, hold };
+  const holdExport = (): PromiseWithResolvers<void> => (exporting = Promise.withResolvers<void>());
+  const holdDecode = (): PromiseWithResolvers<void> => (decoding = Promise.withResolvers<void>());
+  return { cache: createAtlasCache(deps), bakes, loads, revoked, idle, idleQueue, holdExport, holdDecode };
 }
 
 describe('atlas cache', () => {
@@ -116,27 +125,69 @@ describe('atlas cache', () => {
     expect(await cache.acquire(FACES, 41, 3)).toBe(b); // the spare is reused, not re-baked
   });
 
-  it('a pre-bake cancelled during its export is not cached, its atlas is revoked and the spare survives', async () => {
-    const { cache, bakes, revoked, idle, hold } = harness();
-    const spare = await cache.acquire(FACES, 40, 3);
-    cache.release(spare);
-    const exported = hold();
-    const stop = cache.prebake(FACES, () => ({ w: 41, dpr: 3 }));
-    await idle(); // every step taken: the bake now waits on its export
-    stop();
+  it('after its export a pre-bake waits for idle time again before it decodes (so a hidden page holds it there)', async () => {
+    const { cache, loads, idle, idleQueue, holdExport } = harness();
+    const exported = holdExport();
+    cache.prebake(FACES, () => ({ w: 40, dpr: 3 }));
+    await idle(); // every draw step taken: the bake now waits on its export
     exported.resolve();
     await settle();
-    expect(revoked).toHaveLength(1);
-    expect(revoked[0]).toMatchObject({ url: 'blob:41@3#2' });
+    expect(loads).toEqual([]);
+    expect(idleQueue).toHaveLength(1);
+    await idle();
+    expect(loads).toEqual(['blob:40@3#1']);
+  });
+
+  it('a level taking a pre-bake over after its export decodes at once, without idle time', async () => {
+    const { cache, loads, idle, idleQueue, holdExport } = harness();
+    const exported = holdExport();
+    cache.prebake(FACES, () => ({ w: 40, dpr: 3 }));
+    await idle();
+    exported.resolve();
+    await settle(); // waiting for idle time before the decode
+    const p = cache.acquire(FACES, 40, 3);
+    await expect(p).resolves.toMatchObject({ url: 'blob:40@3#1' });
+    expect(loads).toEqual(['blob:40@3#1']);
+    expect(idleQueue).toHaveLength(0);
+  });
+
+  it('a pre-bake cancelled during its export never decodes, is not cached, and the spare survives', async () => {
+    const { cache, bakes, loads, revoked, idle, holdExport } = harness();
+    const spare = await cache.acquire(FACES, 40, 3);
+    cache.release(spare);
+    const exported = holdExport();
+    const stop = cache.prebake(FACES, () => ({ w: 41, dpr: 3 }));
+    await idle(); // every draw step taken: the bake now waits on its export
+    stop();
+    exported.resolve();
+    await idle();
+    expect(loads).toEqual(['blob:40@3#1']); // only the spare was ever decoded
+    expect(revoked).toEqual([]);
     expect(await cache.acquire(FACES, 40, 3)).toBe(spare);
     const fresh = await cache.acquire(FACES, 41, 3);
     expect(bakes).toHaveLength(3);
     expect(fresh.url).toBe('blob:41@3#3');
   });
 
+  it('a pre-bake cancelled during its decode is revoked, not cached, and the spare survives', async () => {
+    const { cache, bakes, revoked, idle, holdDecode } = harness();
+    const spare = await cache.acquire(FACES, 40, 3);
+    cache.release(spare);
+    const decoded = holdDecode();
+    const stop = cache.prebake(FACES, () => ({ w: 41, dpr: 3 }));
+    await idle(); // drawn, exported, and now decoding
+    stop();
+    decoded.resolve();
+    await settle();
+    expect(revoked).toEqual([{ url: 'blob:41@3#2' }]);
+    expect(await cache.acquire(FACES, 40, 3)).toBe(spare);
+    await cache.acquire(FACES, 41, 3);
+    expect(bakes).toHaveLength(3);
+  });
+
   it('a level acquiring in the same task as a cancel during the export still gets that atlas', async () => {
-    const { cache, bakes, revoked, idle, hold } = harness();
-    const exported = hold();
+    const { cache, bakes, revoked, idle, holdExport } = harness();
+    const exported = holdExport();
     const stop = cache.prebake(FACES, () => ({ w: 40, dpr: 3 }));
     await idle();
     stop();
