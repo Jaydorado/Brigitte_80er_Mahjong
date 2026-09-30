@@ -19,6 +19,60 @@ export interface ClosingOpts {
 
 const reducedMotion = (): boolean => window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
+export interface ShowLoop {
+  /** Begins the loop after the start delay (nothing while the page is hidden). */
+  start(): void;
+  /** Call on `visibilitychange`: stops the timer while hidden, restarts it when visible again. */
+  visibilityChanged(): void;
+  /** Ends the loop for good. */
+  stop(): void;
+}
+
+/**
+ * Plays one firework show, waits `SHOW_GAP_MS`, and plays the next, for as long as the page is visible.
+ * A show already in flight finishes on its own (the effect clock pauses with a hidden page); only the
+ * timers are stopped and restarted here.
+ */
+export function createShowLoop(
+  play: () => Promise<void>,
+  isHidden: () => boolean,
+  startDelayMs = 350,
+  gapMs = SHOW_GAP_MS,
+): ShowLoop {
+  let alive = true;
+  let playing = false;
+  let timer: Parameters<typeof clearTimeout>[0];
+
+  const schedule = (ms: number): void => {
+    if (!alive || playing || timer !== undefined || isHidden()) return;
+    timer = setTimeout(run, ms);
+  };
+  const run = (): void => {
+    timer = undefined;
+    if (!alive || isHidden()) return;
+    playing = true;
+    void play().then(() => {
+      playing = false;
+      schedule(gapMs);
+    });
+  };
+
+  return {
+    start: () => schedule(startDelayMs),
+    visibilityChanged() {
+      if (isHidden()) {
+        clearTimeout(timer);
+        timer = undefined;
+      } else schedule(startDelayMs);
+    },
+    stop() {
+      alive = false;
+      clearTimeout(timer);
+      timer = undefined;
+    },
+  };
+}
+
 /** Mounts the closing screen; returns the unmount function. */
 export function mountClosing(root: HTMLElement, opts: ClosingOpts): () => void {
   const screen = document.createElement('section');
@@ -71,19 +125,17 @@ export function mountClosing(root: HTMLElement, opts: ClosingOpts): () => void {
   const offPause = pauseOnHidden(screen);
   back.addEventListener('click', () => opts.onBack());
 
-  // The fireworks loop gently for as long as the screen is up; the fx clock stops while hidden.
-  let alive = true;
-  let timer = 0;
-  const show = (): void => {
-    void fx.fireworks(SHOW_MS).then(() => {
-      if (alive) timer = window.setTimeout(show, SHOW_GAP_MS);
-    });
-  };
-  if (!reducedMotion()) timer = window.setTimeout(show, 350);
+  // The fireworks loop gently for as long as the screen is visible; a hidden page stops the timers too.
+  const loop = createShowLoop(() => fx.fireworks(SHOW_MS), () => document.visibilityState === 'hidden');
+  const onVisibility = (): void => loop.visibilityChanged();
+  if (!reducedMotion()) {
+    document.addEventListener('visibilitychange', onVisibility);
+    loop.start();
+  }
 
   return () => {
-    alive = false;
-    clearTimeout(timer);
+    loop.stop();
+    document.removeEventListener('visibilitychange', onVisibility);
     offPause();
     fx.destroy();
     screen.remove();
