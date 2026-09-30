@@ -85,16 +85,8 @@ interface DrawnAtlas {
 
 /** Draws `faces` at face width `w` (CSS px) and `dpr` into one bitmap and exports it as a PNG. */
 async function draw(faces: readonly FaceId[], w: number, dpr: number, job: BakeJob): Promise<DrawnAtlas> {
-  // Pre-baking: one face request per idle step (each SVG then parses in its own short task).
-  for (const f of faces) {
-    if (job.urgent) break;
-    await job.step();
-    void faceImage(f).catch(() => {}); // the Promise.all below reports a failure
-  }
-  const [images] = await Promise.all([
-    Promise.all(faces.map(faceImage)),
-    document.fonts.load(`700 ${Math.round(w * 0.34)}px ${DISPLAY_FONT}`),
-  ]);
+  await job.step();
+  await document.fonts.load(`700 ${Math.round(w * 0.34)}px ${DISPLAY_FONT}`);
   const size = cellSize(w);
   const index = new Map<FaceId, number>();
   faces.forEach((f, i) => index.set(f, i));
@@ -113,12 +105,21 @@ async function draw(faces: readonly FaceId[], w: number, dpr: number, job: BakeJ
     // A CPU-backed canvas: a one-pixel read rasterises the cell just drawn, so a pre-bake spreads the
     // raster work over its idle steps instead of paying for all of it at once in toBlob.
     const ctx = canvas.getContext('2d', { willReadFrequently: true })!;
+    // Pre-baking, each idle step draws one face and requests the next, so every SVG parses in its own
+    // short task between frames. A level waiting for the atlas requests all remaining faces at once.
+    let requested = 0;
+    const request = (n: number): void => {
+      for (; requested < Math.min(n, faces.length); requested++) void faceImage(faces[requested]).catch(() => {});
+    };
     for (let i = 0; i < faces.length; i++) {
+      request(job.urgent ? faces.length : i + 1);
+      const image = await faceImage(faces[i]);
       await job.step();
+      request(job.urgent ? faces.length : i + 2);
       const f = faces[i];
       const o = cellOrigin(layout, i);
       ctx.setTransform(1, 0, 0, 1, o.x, o.y);
-      drawTile(ctx, images[i], faceCorner(f), w, dpr);
+      drawTile(ctx, image, faceCorner(f), w, dpr);
       if (f === HAKU) drawBlankFrame(ctx, w, dpr);
       if (!job.urgent) ctx.getImageData(o.x, o.y, 1, 1);
     }
@@ -292,8 +293,11 @@ export function createAtlasCache<D>(deps: AtlasCacheDeps<D>, spare = 1): AtlasCa
   };
 }
 
-/** Idle steps shorter than this wait for a longer idle period (a pre-bake step takes up to ~10 ms). */
-const MIN_IDLE_MS = 10;
+/**
+ * Idle periods shorter than this wait for the next one. A pre-bake step (one cell) takes 5–9 ms at 4×
+ * CPU throttle; a 75 Hz display leaves idle periods of about 9 ms beside the map's ambient animation.
+ */
+const MIN_IDLE_MS = 6;
 
 /**
  * Runs `cb` in an idle period with at least MIN_IDLE_MS to spare. While the page is hidden it holds,
