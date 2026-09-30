@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
-import { createAtlasCache, type Atlas, type AtlasCacheDeps } from './atlas';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { createAtlasCache, whenIdle, type Atlas, type AtlasCacheDeps } from './atlas';
 
 const FACES = [0, 1, 2];
 const STEPS = 3;
@@ -9,15 +9,20 @@ async function settle(): Promise<void> {
   for (let i = 0; i < 20; i++) await Promise.resolve();
 }
 
-/** A cache whose bakes take STEPS paced steps, with idle time handed out by the test. */
+/**
+ * A cache whose bakes take STEPS paced steps, with idle time handed out by the test. While `exporting`
+ * is set, a bake that has taken its last step waits on it (the canvas export and image decode).
+ */
 function harness() {
   const idleQueue: (() => void)[] = [];
   const bakes: { w: number; dpr: number }[] = [];
   const revoked: Atlas[] = [];
+  let exporting: PromiseWithResolvers<void> | null = null;
   const deps: AtlasCacheDeps = {
     async bake(_faces, w, dpr, job) {
       bakes.push({ w, dpr });
       for (let i = 0; i < STEPS; i++) await job.step();
+      await exporting?.promise;
       return { url: `blob:${w}@${dpr}#${bakes.length}`, w, dpr } as unknown as Atlas;
     },
     revoke: (a) => revoked.push(a),
@@ -38,7 +43,8 @@ function harness() {
       cb();
     }
   };
-  return { cache: createAtlasCache(deps), bakes, revoked, idle, idleQueue };
+  const hold = (): PromiseWithResolvers<void> => (exporting = Promise.withResolvers<void>());
+  return { cache: createAtlasCache(deps), bakes, revoked, idle, idleQueue, hold };
 }
 
 describe('atlas cache', () => {
@@ -108,5 +114,98 @@ describe('atlas cache', () => {
     expect(revoked).toEqual([a]); // b is the newer spare
     expect(revoked).not.toContain(c);
     expect(await cache.acquire(FACES, 41, 3)).toBe(b); // the spare is reused, not re-baked
+  });
+
+  it('a pre-bake cancelled during its export is not cached, its atlas is revoked and the spare survives', async () => {
+    const { cache, bakes, revoked, idle, hold } = harness();
+    const spare = await cache.acquire(FACES, 40, 3);
+    cache.release(spare);
+    const exported = hold();
+    const stop = cache.prebake(FACES, () => ({ w: 41, dpr: 3 }));
+    await idle(); // every step taken: the bake now waits on its export
+    stop();
+    exported.resolve();
+    await settle();
+    expect(revoked).toHaveLength(1);
+    expect(revoked[0]).toMatchObject({ url: 'blob:41@3#2' });
+    expect(await cache.acquire(FACES, 40, 3)).toBe(spare);
+    const fresh = await cache.acquire(FACES, 41, 3);
+    expect(bakes).toHaveLength(3);
+    expect(fresh.url).toBe('blob:41@3#3');
+  });
+
+  it('a level acquiring in the same task as a cancel during the export still gets that atlas', async () => {
+    const { cache, bakes, revoked, idle, hold } = harness();
+    const exported = hold();
+    const stop = cache.prebake(FACES, () => ({ w: 40, dpr: 3 }));
+    await idle();
+    stop();
+    const p = cache.acquire(FACES, 40, 3);
+    exported.resolve();
+    await expect(p).resolves.toMatchObject({ url: 'blob:40@3#1' });
+    expect(bakes).toHaveLength(1);
+    expect(revoked).toEqual([]);
+  });
+});
+
+describe('whenIdle', () => {
+  let visibility: DocumentVisibilityState;
+  const listeners = new Set<() => void>();
+  const idleCallbacks = new Map<number, IdleRequestCallback>();
+  let nextId = 1;
+  /** One idle period with `ms` to spare: every callback requested so far runs. */
+  const idlePeriod = (ms = 50): void => {
+    const due = [...idleCallbacks.values()];
+    idleCallbacks.clear();
+    for (const cb of due) cb({ didTimeout: false, timeRemaining: () => ms });
+  };
+  const setVisibility = (v: DocumentVisibilityState): void => {
+    visibility = v;
+    for (const l of [...listeners]) l();
+  };
+
+  beforeEach(() => {
+    visibility = 'visible';
+    listeners.clear();
+    idleCallbacks.clear();
+    vi.stubGlobal('document', {
+      get visibilityState() {
+        return visibility;
+      },
+      addEventListener: (_type: string, l: () => void) => listeners.add(l),
+      removeEventListener: (_type: string, l: () => void) => listeners.delete(l),
+    });
+    vi.stubGlobal('requestIdleCallback', (cb: IdleRequestCallback) => {
+      idleCallbacks.set(nextId, cb);
+      return nextId++;
+    });
+    vi.stubGlobal('cancelIdleCallback', (id: number) => idleCallbacks.delete(id));
+  });
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('runs no step while the page is hidden and resumes once it is visible again', () => {
+    const cb = vi.fn();
+    whenIdle(cb);
+    setVisibility('hidden');
+    idlePeriod();
+    idlePeriod();
+    expect(cb).not.toHaveBeenCalled();
+    setVisibility('visible');
+    expect(listeners.size).toBe(0);
+    expect(cb).not.toHaveBeenCalled(); // back to waiting for an idle period
+    idlePeriod();
+    expect(cb).toHaveBeenCalledTimes(1);
+  });
+
+  it('cancelling while hidden removes its visibility listener and never runs', () => {
+    const cb = vi.fn();
+    const cancel = whenIdle(cb);
+    setVisibility('hidden');
+    idlePeriod();
+    cancel();
+    expect(listeners.size).toBe(0);
+    setVisibility('visible');
+    idlePeriod();
+    expect(cb).not.toHaveBeenCalled();
   });
 });

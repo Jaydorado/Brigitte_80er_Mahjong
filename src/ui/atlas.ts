@@ -73,7 +73,11 @@ export interface BakeJob {
   step(): Promise<void>;
   /** A level waits for this atlas: no more idle pacing. */
   readonly urgent: boolean;
+  /** A pre-bake nobody took over was cancelled: stop at the next check, keep nothing. */
+  readonly dropped: boolean;
 }
+
+const DROPPED = 'atlas pre-bake dropped';
 
 /**
  * Bakes `faces` at face width `w` (CSS px) and `dpr`. Resolves once the atlas image itself is
@@ -122,6 +126,7 @@ async function bake(faces: readonly FaceId[], w: number, dpr: number, job: BakeJ
     blob = await new Promise<Blob>((resolve, reject) =>
       canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('atlas toBlob failed'))), 'image/png'),
     );
+    if (job.dropped) throw new DOMException(DROPPED, 'AbortError'); // cancelled during the export: skip the decode
   } finally {
     canvas.width = canvas.height = 0; // drop the backing store now, not at GC
   }
@@ -191,15 +196,18 @@ export function createAtlasCache(deps: AtlasCacheDeps, spare = 1): AtlasCache {
       get urgent() {
         return e.urgent;
       },
+      get dropped() {
+        return e.dropped && !e.urgent;
+      },
       step() {
         // A level acquires by setting `urgent`, so a dropped bake it took over (even in the same task as the cancel) runs on.
         if (e.urgent) return Promise.resolve();
-        if (e.dropped) return Promise.reject(new DOMException('atlas pre-bake dropped', 'AbortError'));
+        if (e.dropped) return Promise.reject(new DOMException(DROPPED, 'AbortError'));
         const { promise, resolve, reject } = Promise.withResolvers<void>();
         const done = (): void => {
           e.wake = null;
           if (e.urgent || !e.dropped) resolve();
-          else reject(new DOMException('atlas pre-bake dropped', 'AbortError'));
+          else reject(new DOMException(DROPPED, 'AbortError'));
         };
         const cancelIdle = deps.idle(done);
         e.wake = () => {
@@ -210,18 +218,23 @@ export function createAtlasCache(deps: AtlasCacheDeps, spare = 1): AtlasCache {
       },
     };
     entries.set(key, e);
-    e.promise = deps.bake(faces, w, dpr, job).then(
-      (a) => {
+    e.promise = deps
+      .bake(faces, w, dpr, job)
+      .then((a) => {
+        if (job.dropped) {
+          // Cancelled after its last step (during the export or decode): never cached, so no spare is evicted for it.
+          deps.revoke(a);
+          throw new DOMException(DROPPED, 'AbortError');
+        }
         e.atlas = a;
         e.used = ++clock;
         if (e.users === 0) evict();
         return a;
-      },
-      (err: unknown) => {
+      })
+      .catch((err: unknown) => {
         if (entries.get(key) === e) entries.delete(key);
         throw err;
-      },
-    );
+      });
     return e;
   };
 
@@ -273,16 +286,34 @@ export function createAtlasCache(deps: AtlasCacheDeps, spare = 1): AtlasCache {
 /** Idle steps shorter than this wait for a longer idle period (a pre-bake step takes up to ~10 ms). */
 const MIN_IDLE_MS = 10;
 
-function whenIdle(cb: () => void): () => void {
-  if (typeof requestIdleCallback !== 'function') {
-    const t = window.setTimeout(cb, 50);
-    return () => clearTimeout(t);
-  }
-  let id = requestIdleCallback(function tick(d) {
-    if (d.timeRemaining() < MIN_IDLE_MS) id = requestIdleCallback(tick);
+/**
+ * Runs `cb` in an idle period with at least MIN_IDLE_MS to spare. While the page is hidden it holds,
+ * listening for `visibilitychange` only until visible again, then waits for idle anew. Returns a cancel.
+ */
+export function whenIdle(cb: () => void): () => void {
+  let idleId = 0;
+  let timer = 0;
+  const onVisibility = (): void => {
+    if (document.visibilityState === 'hidden') return;
+    document.removeEventListener('visibilitychange', onVisibility);
+    request();
+  };
+  const tick = (d?: IdleDeadline): void => {
+    idleId = timer = 0;
+    if (document.visibilityState === 'hidden') document.addEventListener('visibilitychange', onVisibility);
+    else if (d !== undefined && d.timeRemaining() < MIN_IDLE_MS) request();
     else cb();
-  });
-  return () => cancelIdleCallback(id);
+  };
+  const request = (): void => {
+    if (typeof requestIdleCallback === 'function') idleId = requestIdleCallback(tick);
+    else timer = window.setTimeout(tick, 50);
+  };
+  request();
+  return () => {
+    if (idleId !== 0) cancelIdleCallback(idleId);
+    if (timer !== 0) clearTimeout(timer);
+    document.removeEventListener('visibilitychange', onVisibility);
+  };
 }
 
 const cache = createAtlasCache({ bake, revoke: (a) => URL.revokeObjectURL(a.url), idle: whenIdle });
