@@ -14,5 +14,8 @@ const save = loadSave(localStorage);
 startRouter(root, localStorage, save, save.welcomeSeen ? { name: 'map' } : { name: 'welcome' });
 initSw(isSafeScreen);
 
-// The Playwright smoke hook (`window.__mahjong`): dev builds and `?smoke` only, never a normal launch.
-if (import.meta.env.DEV || location.search.includes('smoke')) void import('./ui/testHook');
+// The Playwright smoke hook (`window.__mahjong`): the dev server, or the dedicated smoke build
+// (`VITE_SMOKE=1`) opened with `?smoke`. Ordinary builds drop this line, so they neither ship nor precache it.
+if (import.meta.env.DEV || (import.meta.env.VITE_SMOKE === '1' && location.search.includes('smoke'))) {
+  void import('./ui/testHook');
+}
