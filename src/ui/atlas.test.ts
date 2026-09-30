@@ -1,5 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createAtlasCache, createStepEstimate, RECENT_STEPS, STEP_MARGIN_MS, whenIdle, type Atlas, type AtlasCacheDeps } from './atlas';
+import {
+  createAtlasCache, createStepEstimate, RECENT_MS, RECENT_STEPS, SETUP_SEED_MS_PER_MPX, setUpBitmap, STARVED_MS,
+  STEP_MARGIN_MS, whenIdle, type Atlas, type AtlasCacheDeps, type BakeJob,
+} from './atlas';
 
 const FACES = [0, 1, 2];
 const STEPS = 3;
@@ -204,13 +207,16 @@ describe('whenIdle', () => {
   const listeners = new Set<() => void>();
   const idleCallbacks = new Map<number, IdleRequestCallback>();
   let nextId = 1;
-  /** One idle period with `ms` to spare: every callback requested so far runs. The period is over once they return. */
+  /** performance.now(), advanced by the test. */
+  let clock = 0;
+  /** One idle period with `ms` to spare: every callback requested so far runs. The period is over once they return; the next frame starts. */
   const idlePeriod = (ms = 50): void => {
     const due = [...idleCallbacks.values()];
     idleCallbacks.clear();
     let open = true;
     for (const cb of due) cb({ didTimeout: false, timeRemaining: () => (open ? ms : 0) });
     open = false;
+    clock += 1000 / 75;
   };
   const setVisibility = (v: DocumentVisibilityState): void => {
     visibility = v;
@@ -221,6 +227,8 @@ describe('whenIdle', () => {
     visibility = 'visible';
     listeners.clear();
     idleCallbacks.clear();
+    clock = 0;
+    vi.spyOn(performance, 'now').mockImplementation(() => clock);
     vi.stubGlobal('document', {
       get visibilityState() {
         return visibility;
@@ -234,7 +242,10 @@ describe('whenIdle', () => {
     });
     vi.stubGlobal('cancelIdleCallback', (id: number) => idleCallbacks.delete(id));
   });
-  afterEach(() => vi.unstubAllGlobals());
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
 
   it('runs only in an idle period with at least the time asked for; shorter ones wait for the next', () => {
     const cb = vi.fn();
@@ -295,9 +306,102 @@ describe('whenIdle', () => {
     idlePeriod();
     expect(cb).not.toHaveBeenCalled();
   });
+
+  it('a step no idle period has time for runs, once refused for STARVED_MS, in a period as long as the longest it was offered', () => {
+    const cb = vi.fn();
+    whenIdle(cb, 20);
+    for (let i = 0; clock < STARVED_MS; i++) idlePeriod(i === 3 ? 9 : 7);
+    expect(cb).not.toHaveBeenCalled(); // the 9 ms period came before it was starved
+    idlePeriod(7);
+    idlePeriod(8.9);
+    expect(cb).not.toHaveBeenCalled();
+    idlePeriod(9);
+    expect(cb).toHaveBeenCalledTimes(1);
+  });
+
+  it('an outlier pass followed by only shorter idle periods still finishes the pre-bake', async () => {
+    const loads: string[] = [];
+    const cache = createAtlasCache<string>({
+      // Paces its passes as the atlas does: each asks for its kind's estimate and records what it took.
+      async draw(_faces, w, dpr, job) {
+        const passes = createStepEstimate(2);
+        for (let i = 0; i < 12; i++) {
+          await job.step(passes.need);
+          const ms = i === 1 ? 20 : 2; // one pass (a GC pause, say) slower than any idle period the page offers
+          clock += ms;
+          passes.record(ms);
+        }
+        return `blob:${w}@${dpr}`;
+      },
+      async load(url) {
+        loads.push(url);
+        return { url } as unknown as Atlas;
+      },
+      revoke: () => {},
+      idle: whenIdle,
+    });
+    cache.prebake(FACES, () => ({ w: 40, dpr: 3 }));
+    for (let n = 0; n < 200 && loads.length === 0; n++) {
+      idlePeriod(9);
+      await settle();
+    }
+    expect(loads).toEqual(['blob:40@3']);
+  });
+
+  describe('bitmap setup', () => {
+    /** A canvas whose backing-store allocation (a first draw after sizing) takes `msPerMpx` per million px. */
+    const fakeCanvas = (msPerMpx: number) => {
+      const c = {
+        width: 0,
+        height: 0,
+        getContext: () => ({ clearRect: () => void (clock += (msPerMpx * c.width * c.height) / 1e6) }),
+      };
+      return c;
+    };
+    const job: BakeJob = { urgent: false, step: (needMs) => new Promise<void>((resolve) => void whenIdle(resolve, needMs)) };
+    /**
+     * Sets up a 3-Mpx bitmap (its context step, then its allocation step), handing out idle periods of
+     * `ms` until it is set up or `max` have passed; returns the canvas.
+     */
+    const setUp = async (msPerMpx: number, ms: number, max = 2) => {
+      const c = fakeCanvas(msPerMpx);
+      void setUpBitmap(c as unknown as HTMLCanvasElement, 2000, 1500, job);
+      for (let n = 0; n < max && c.width !== 2000; n++) {
+        await settle();
+        idlePeriod(ms);
+        await settle();
+      }
+      return c;
+    };
+
+    it('sets the bitmap up only in an idle period with time for its size', async () => {
+      const need = SETUP_SEED_MS_PER_MPX * 3 + STEP_MARGIN_MS;
+      expect((await setUp(SETUP_SEED_MS_PER_MPX, need - 0.1, 3)).width).not.toBe(2000);
+      idleCallbacks.clear();
+      expect((await setUp(SETUP_SEED_MS_PER_MPX, need)).width).toBe(2000);
+    });
+
+    it('budgets the next setup for the slower of the seed and the last one measured', async () => {
+      await setUp(2 * SETUP_SEED_MS_PER_MPX, 50); // twice the seed's cost
+      const slowNeed = 2 * SETUP_SEED_MS_PER_MPX * 3 + STEP_MARGIN_MS;
+      expect((await setUp(SETUP_SEED_MS_PER_MPX / 2, slowNeed - 0.1)).width).not.toBe(2000);
+      idlePeriod(slowNeed);
+      await settle();
+      // That one measured half the seed's cost, so the budget is back at the seed.
+      const seedNeed = SETUP_SEED_MS_PER_MPX * 3 + STEP_MARGIN_MS;
+      expect((await setUp(SETUP_SEED_MS_PER_MPX, seedNeed)).width).toBe(2000);
+    });
+  });
 });
 
 describe('step estimate', () => {
+  let clock = 0;
+  beforeEach(() => {
+    clock = 0;
+    vi.spyOn(performance, 'now').mockImplementation(() => clock);
+  });
+  afterEach(() => vi.restoreAllMocks());
+
   it('asks for the seed plus a margin before any step is measured', () => {
     expect(createStepEstimate(6).need).toBe(6 + STEP_MARGIN_MS);
   });
@@ -321,5 +425,16 @@ describe('step estimate', () => {
     expect(e.need).toBe(9 + STEP_MARGIN_MS);
     e.record(3);
     expect(e.need).toBe(3 + STEP_MARGIN_MS);
+  });
+
+  it('forgets a slow step RECENT_MS after it ran, even when no newer step has run since', () => {
+    const e = createStepEstimate(2);
+    e.record(3);
+    clock += 100;
+    e.record(20);
+    clock += RECENT_MS - 1;
+    expect(e.need).toBe(20 + STEP_MARGIN_MS);
+    clock += 1;
+    expect(e.need).toBe(2 + STEP_MARGIN_MS); // both measured steps forgotten: the seed again
   });
 });

@@ -82,19 +82,29 @@ export interface BakeJob {
 export const STEP_MARGIN_MS = 1;
 /** How many of the latest step durations the estimate keeps: enough to span the dearer face SVGs. */
 export const RECENT_STEPS = 8;
+/**
+ * How long the estimate keeps a step duration. One slow step (a GC pause, say) can ask for more than
+ * any idle period the page offers, so no newer step could run to displace it: it is forgotten by
+ * age instead. The step waiting behind it runs once starved (STARVED_MS) and then finds it gone.
+ */
+export const RECENT_MS = 250;
 
 /**
  * The idle time the next step of one kind needs: the slowest of the recent steps plus a margin.
- * `seedMs` stands in for a measured step until RECENT_STEPS real ones have displaced it.
+ * `seedMs` stands in for a measured step until RECENT_STEPS real ones have displaced it, and again
+ * once every measured one is older than RECENT_MS.
  */
 export function createStepEstimate(seedMs: number): { readonly need: number; record(ms: number): void } {
-  const recent = [seedMs];
+  const recent = [{ ms: seedMs, at: Infinity }]; // the seed never ages
   return {
     get need() {
-      return Math.max(...recent) + STEP_MARGIN_MS;
+      const now = performance.now();
+      let slowest = -1;
+      for (const s of recent) if (now - s.at < RECENT_MS) slowest = Math.max(slowest, s.ms);
+      return (slowest < 0 ? seedMs : slowest) + STEP_MARGIN_MS;
     },
     record(ms) {
-      recent.push(ms);
+      recent.push({ ms, at: performance.now() });
       if (recent.length > RECENT_STEPS) recent.shift();
     },
   };
@@ -102,10 +112,47 @@ export function createStepEstimate(seedMs: number): { readonly need: number; rec
 
 /**
  * Pass steps before any is measured. At 4× CPU throttle a body pass takes 3–4 ms and a face pass
- * 1.5–5 ms, depending on the face's SVG; the atlas's first face pass about 6 ms.
+ * 1.5–5 ms, depending on the face's SVG. The atlas's first passes run cold: headed, the first body
+ * pass measured 3.7–6.5 ms and the first face pass 5.0–8.4 ms over 65 level-6 pre-bakes.
  */
 const BODY_SEED_MS = 6;
-const FACE_SEED_MS = 6;
+const FACE_SEED_MS = 8;
+
+/**
+ * Allocating a bitmap's backing store costs in proportion to its pixels: level 6 at DPR 3 (1124×1358,
+ * 1.53 Mpx) measured 3.2–4.1 ms at 4× CPU throttle headed (2.1–2.7 ms per million px), 2.9–3.3 headless.
+ */
+export const SETUP_SEED_MS_PER_MPX = 3;
+/** The latest pre-bake's measured allocation cost, ms per million px. */
+let setupMsPerMpx = SETUP_SEED_MS_PER_MPX;
+
+/**
+ * Sizes `canvas` to w×h device px and returns its context with the backing store allocated, in two
+ * steps. First the context, on a 1-px bitmap: a page's first canvas draw can wait on a synchronous
+ * call that opens the renderer's GPU channel, measured 0.2–4.5 ms at 4× CPU throttle, and it must not
+ * land in the allocation's budget. Then the bitmap, budgeted for its pixels at the slower of the seed
+ * and the latest measured rate.
+ */
+export async function setUpBitmap(canvas: HTMLCanvasElement, w: number, h: number, job: BakeJob): Promise<CanvasRenderingContext2D> {
+  await job.step();
+  canvas.width = canvas.height = 1;
+  // A CPU-backed canvas: a one-pixel read rasterises what was just drawn, so a pre-bake spreads the
+  // raster work over its idle steps instead of paying for all of it at once in toBlob.
+  const ctx = canvas.getContext('2d', { willReadFrequently: true })!;
+  if (!job.urgent) ctx.clearRect(0, 0, 1, 1);
+  const mpx = (w * h) / 1e6;
+  await job.step(Math.max(SETUP_SEED_MS_PER_MPX, setupMsPerMpx) * mpx + STEP_MARGIN_MS);
+  const start = performance.now();
+  // Resizing resets the bitmap and the context state. The first draw call allocates the backing store
+  // (a read does not), so a no-op clear does it here.
+  canvas.width = w;
+  canvas.height = h;
+  if (!job.urgent) {
+    ctx.clearRect(0, 0, 1, 1);
+    setupMsPerMpx = (performance.now() - start) / mpx;
+  }
+  return ctx;
+}
 
 const DROPPED = 'atlas pre-bake dropped';
 
@@ -131,15 +178,8 @@ async function draw(faces: readonly FaceId[], w: number, dpr: number, job: BakeJ
   const px = atlasSize(layout);
   const canvas = document.createElement('canvas');
   try {
-    // Setting up the bitmap (megabytes at DPR 3) is a step of its own, apart from the first cell.
-    await job.step();
-    canvas.width = px.w;
-    canvas.height = px.h;
-    // A CPU-backed canvas: a one-pixel read rasterises what was just drawn, so a pre-bake spreads the
-    // raster work over its idle steps instead of paying for all of it at once in toBlob. The first
-    // draw call allocates the backing store (a read does not), so a no-op clear does it here.
-    const ctx = canvas.getContext('2d', { willReadFrequently: true })!;
-    if (!job.urgent) ctx.clearRect(0, 0, 1, 1);
+    // Setting up the bitmap (megabytes at DPR 3) takes steps of its own, apart from the first cell.
+    const ctx = await setUpBitmap(canvas, px.w, px.h, job);
     // Pre-baking, each cell is two steps, its body pass and then its face pass, and each waits for an
     // idle period long enough for the slowest recent step of its kind.
     const bodySteps = createStepEstimate(BODY_SEED_MS);
@@ -344,31 +384,52 @@ export function createAtlasCache<D>(deps: AtlasCacheDeps<D>, spare = 1): AtlasCa
   };
 }
 
-/** The idle time a step asks for unless it says otherwise: starting a pre-bake, setting up its bitmap, decoding its export. */
+/** The idle time a step asks for unless it says otherwise: starting a pre-bake, opening its context, decoding its export. */
 const MIN_IDLE_MS = 6;
+
+/**
+ * How long a step waits for an idle period with the time it asks for before it settles for the longest
+ * period offered meanwhile. A step that asks for more than this page ever offers (an estimate or budget
+ * above a fast display's idle periods) would otherwise stall the pre-bake for good. Long enough that a
+ * short run of busy frames, whose idle periods are all short, does not lower the bar.
+ */
+export const STARVED_MS = 250;
 
 /** The latest idle period handed out; its timeRemaining() is 0 once it is over. */
 let period: IdleDeadline | null = null;
 
 /**
  * Runs `cb` in an idle period with at least `needMs` to spare: the current one if it still has that
- * much left, else the next one that does. While the page is hidden it holds, listening for
- * `visibilitychange` only until visible again, then waits for idle anew. Returns a cancel.
+ * much left, else the next one that does, or once refused for STARVED_MS, the next one as long as the
+ * longest refused. While the page is hidden it holds, listening for `visibilitychange` only until
+ * visible again, then waits for idle anew. Returns a cancel.
  */
 export function whenIdle(cb: () => void, needMs = MIN_IDLE_MS): () => void {
   let idleId = 0;
   let timer = 0;
   let cancelled = false;
+  // Starvation is measured from when the wait began or the page became visible again.
+  let since = performance.now();
+  let longest = -1; // the longest idle period refused, ms; none yet
   const onVisibility = (): void => {
     if (document.visibilityState === 'hidden') return;
     document.removeEventListener('visibilitychange', onVisibility);
+    since = performance.now();
+    longest = -1;
     request();
+  };
+  const admits = (d: IdleDeadline): boolean => {
+    const left = d.timeRemaining();
+    const starved = longest >= 0 && performance.now() - since >= STARVED_MS;
+    if (left >= (starved ? Math.min(needMs, longest) : needMs)) return true;
+    longest = Math.max(longest, left);
+    return false;
   };
   const tick = (d?: IdleDeadline): void => {
     idleId = timer = 0;
     if (d !== undefined) period = d;
     if (document.visibilityState === 'hidden') document.addEventListener('visibilitychange', onVisibility);
-    else if (d !== undefined && d.timeRemaining() < needMs) request();
+    else if (d !== undefined && !admits(d)) request();
     else cb();
   };
   const request = (): void => {
