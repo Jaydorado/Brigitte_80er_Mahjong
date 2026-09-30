@@ -14,6 +14,11 @@ export interface Fx {
   sparkle(x: number, y: number): void;
   confetti(ms: number): Promise<void>;
   fireworks(ms: number): Promise<void>;
+  /**
+   * Resolves once nothing is alive or scheduled any more, e.g. the last confetti piece has landed.
+   * Runs on the effect clock, so it waits while the page is hidden. Resolves on destroy.
+   */
+  idle(): Promise<void>;
   destroy(): void;
 }
 
@@ -117,6 +122,8 @@ export class FxEngine {
   private reserved = 0;
   private readonly tasks: Task[] = [];
   private readonly waits: Wait[] = [];
+  /** `idle()` callers, resolved by the step that leaves nothing alive or scheduled. */
+  private readonly idlers: (() => void)[] = [];
 
   constructor(private readonly rand: () => number = Math.random) {}
 
@@ -289,6 +296,15 @@ export class FxEngine {
       }
       i++;
     }
+    if (this.idlers.length > 0 && !this.active) for (const resolve of this.idlers.splice(0)) resolve();
+  }
+
+  /** Resolves once nothing is alive or scheduled (at once if that holds now). */
+  idle(): Promise<void> {
+    const { promise, resolve } = Promise.withResolvers<void>();
+    if (this.active) this.idlers.push(resolve);
+    else resolve();
+    return promise;
   }
 
   /** Drops every particle and emitter and resolves the pending effect promises. */
@@ -298,6 +314,7 @@ export class FxEngine {
     this.tasks.length = 0;
     const waits = this.waits.splice(0);
     for (const w of waits) w.resolve();
+    for (const resolve of this.idlers.splice(0)) resolve();
   }
 
   private schedule(at: number, run: (at: number) => number): void {
@@ -739,6 +756,10 @@ export function createFx(root: HTMLElement): Fx {
       const done = engine.fireworks(ms);
       run();
       return done;
+    },
+    idle() {
+      // Destroyed or reduced motion: the engine is empty, so this resolves at once.
+      return engine.idle();
     },
     destroy() {
       if (destroyed) return;

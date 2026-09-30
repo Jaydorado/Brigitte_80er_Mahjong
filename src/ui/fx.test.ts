@@ -90,6 +90,41 @@ describe('FxEngine', () => {
     expect(CONFETTI_TAIL_MS).toBeLessThanOrEqual(1000);
   });
 
+  it('idle() resolves when the last confetti piece is gone on the effect clock, not before', async () => {
+    const e = engine();
+    let shown = false;
+    let idle = false;
+    void e.confetti(1500).then(() => (shown = true));
+    void e.idle().then(() => (idle = true));
+    let ms = 0;
+    while (e.live > 0 || !shown) {
+      await flush();
+      expect(idle).toBe(false);
+      e.step(16);
+      ms += 16;
+    }
+    await flush();
+    expect(idle).toBe(true);
+    expect(ms).toBeGreaterThan(1500);
+    expect(ms).toBeLessThanOrEqual(1500 + CONFETTI_TAIL_MS + 16);
+  });
+
+  it('idle() resolves at once when nothing plays, and on destroy', async () => {
+    const e = engine();
+    let n = 0;
+    void e.idle().then(() => n++);
+    await flush();
+    expect(n).toBe(1);
+    void e.confetti(1500);
+    void e.idle().then(() => n++);
+    e.step(16);
+    await flush();
+    expect(n).toBe(1);
+    e.destroy();
+    await flush();
+    expect(n).toBe(2);
+  });
+
   it('long frames count at most 50 ms each, so a stalled tab does not skip the show', async () => {
     const e = engine();
     let done = false;

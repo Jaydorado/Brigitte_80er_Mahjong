@@ -18,7 +18,7 @@ import { atlasDpr, bakeAtlas, releaseAtlas, type Atlas } from './atlas';
 import { createBoard, type BoardView } from './board';
 import { createCluePaper } from './cluePaper';
 import { confirmLeave, showStuck } from './dialogs';
-import { CONFETTI_TAIL_MS, createFx } from './fx';
+import { createFx } from './fx';
 import { measureFrame, type Frame } from './frame';
 import { createHud } from './hud';
 
@@ -177,6 +177,8 @@ export function mountLevel(root: HTMLElement, level: LevelDef, deps: LevelDeps):
   let confirming = false;
   let closeStuck: (() => void) | null = null;
   let stuckTimer = 0;
+  /** The player closed the stuck dialog with ×, Escape or a backdrop tap: no re-offer until asked. */
+  let stuckDismissed = false;
   let board: BoardView | null = null;
   let animator: BoardAnimator | null = null;
   let atlas: Atlas | null = null;
@@ -188,13 +190,17 @@ export function mountLevel(root: HTMLElement, level: LevelDef, deps: LevelDeps):
     if (!alive || won || leaving) return;
     const prev = state;
     state = reduce(state, a);
-    if (animator) animator.play(prev, state);
-    hud.update(state);
     const now = status(state);
     if (now === 'won') {
       won = true;
+      deps.persist(markWon(save, level.id)); // saved before anything plays
+    }
+    if (animator) animator.play(prev, state);
+    hud.update(state);
+    if (now === 'won') {
       void celebrate();
     } else if (now === 'stuck' && (status(prev) !== 'stuck' || state.event.type === 'stuckHint')) {
+      stuckDismissed = false;
       offerStuck();
     }
   }
@@ -205,10 +211,12 @@ export function mountLevel(root: HTMLElement, level: LevelDef, deps: LevelDeps):
     const g = gen;
     stuckTimer = window.setTimeout(() => {
       stuckTimer = 0;
+      // While the leave question is open, its Weiterspielen offers this again.
       if (g !== gen || won || leaving || confirming || closeStuck || status(state) !== 'stuck') return;
       const closed = (then?: Action): void => {
         closeStuck = null;
         if (then) dispatch(then);
+        else stuckDismissed = true;
       };
       closeStuck = showStuck(screen, {
         canUndo: state.history.length > 0,
@@ -219,15 +227,14 @@ export function mountLevel(root: HTMLElement, level: LevelDef, deps: LevelDeps):
     }, SETTLE_MS);
   }
 
-  /** Saved at once; then the last match lands, confetti plays and its last pieces fall; then `onWon`. */
+  /** The last match lands, confetti plays and its last pieces fall (effect clock); then `onWon`. */
   async function celebrate(): Promise<void> {
     const g = gen;
-    deps.persist(markWon(save, level.id));
     await wait(SETTLE_MS);
     if (g !== gen) return;
     await fx.confetti(CONFETTI_MS);
     if (g !== gen) return;
-    if (!reducedMotion) await wait(CONFETTI_TAIL_MS);
+    await fx.idle(); // ≤ CONFETTI_TAIL_MS of shown time; pauses with the effects while hidden
     if (g !== gen) return;
     deps.onWon(level.id);
   }
@@ -247,6 +254,7 @@ export function mountLevel(root: HTMLElement, level: LevelDef, deps: LevelDeps):
       if (g !== gen) return;
       confirming = false;
       if (yes) leave();
+      else if (status(state) === 'stuck' && !stuckDismissed) offerStuck();
     });
   }
 
