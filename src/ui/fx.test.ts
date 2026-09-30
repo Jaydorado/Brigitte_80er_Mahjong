@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
-import { FxEngine, MAX_PARTICLES } from './fx';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { createFx, FxEngine, MAX_PARTICLES } from './fx';
 
 /** Deterministic stand-in for Math.random. */
 function lcg(seed: number): () => number {
@@ -48,6 +48,20 @@ describe('FxEngine', () => {
     expect(e.live).toBe(24);
   });
 
+  it("sparks reserved for a climbing rocket stay free: sparkles filling the pool don't swallow its burst", () => {
+    const e = engine();
+    void e.fireworks(1000); // one rocket only: launches stop after 100 ms
+    e.step(16);
+    const trails = (): number => e.pool.slice(0, e.live).filter((p) => p.trail > 0).length; // rocket and sparks; sparkles have none
+    let peak = 0;
+    for (let ms = 0; ms < 1500; ms += 16) {
+      for (let k = 0; k < 3; k++) e.sparkle(400, 180); // keep the pool as full as other emitters can make it
+      e.step(16);
+      peak = Math.max(peak, trails());
+    }
+    expect(peak).toBeGreaterThanOrEqual(56); // the smallest burst pattern, whole
+  });
+
   it('confetti resolves once its time has played, not before', async () => {
     const e = engine();
     let done = false;
@@ -82,5 +96,55 @@ describe('FxEngine', () => {
     expect(settled).toBe(2);
     expect(e.live).toBe(0);
     expect(e.active).toBe(false);
+  });
+});
+
+describe('createFx frame loop', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it('requests no frames while no particle is alive between emissions, and wakes for the next one', () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'performance', 'Date'] });
+    const frames: FrameRequestCallback[] = [];
+    const canvas = { style: {}, hidden: true, width: 0, height: 0, setAttribute() {}, getContext: () => null, remove() {} };
+    vi.stubGlobal('document', { createElement: () => canvas, addEventListener() {}, removeEventListener() {}, visibilityState: 'visible' });
+    vi.stubGlobal('innerWidth', 800);
+    vi.stubGlobal('innerHeight', 360);
+    vi.stubGlobal('window', globalThis);
+    vi.stubGlobal('devicePixelRatio', 1);
+    vi.stubGlobal('addEventListener', () => {});
+    vi.stubGlobal('removeEventListener', () => {});
+    vi.stubGlobal('matchMedia', () => ({ matches: false }));
+    vi.stubGlobal('requestAnimationFrame', (cb: FrameRequestCallback) => frames.push(cb));
+    vi.stubGlobal('cancelAnimationFrame', () => {});
+    /** Runs `ms` of wall time at 60 Hz: timers fire, and each queued frame runs once per 16 ms. */
+    const pump = (ms: number): number => {
+      let ran = 0;
+      for (let t = 0; t < ms; t += 16) {
+        vi.advanceTimersByTime(16);
+        const due = frames.splice(0);
+        for (const cb of due) cb(performance.now());
+        ran += due.length;
+      }
+      return ran;
+    };
+
+    const fx = createFx({ append() {} } as unknown as HTMLElement);
+    let done = false;
+    void fx.confetti(1_000_000).then(() => (done = true)); // rain drops thousands of ms apart
+    expect(pump(7000)).toBeGreaterThan(100); // the opening volley is drawn every frame until it lands
+    // The volley has landed; the next drop is seconds away: no frames meanwhile, only a timer.
+    const idle = pump(1000);
+    expect(idle).toBe(0);
+    expect(frames.length).toBe(0);
+    expect(canvas.hidden).toBe(true);
+    expect(vi.getTimerCount()).toBe(1);
+    // The timer wakes the loop for the next drop.
+    expect(pump(8000)).toBeGreaterThan(0);
+    expect(done).toBe(false);
+    fx.destroy();
+    expect(vi.getTimerCount()).toBe(0);
   });
 });

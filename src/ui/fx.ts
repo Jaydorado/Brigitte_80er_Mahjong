@@ -122,6 +122,25 @@ export class FxEngine {
     return this.live > 0 || this.tasks.length > 0 || this.waits.length > 0;
   }
 
+  /** Effect-clock ms until the next emitter or effect promise is due; Infinity when none is. */
+  get nextDue(): number {
+    let at = Infinity;
+    for (const task of this.tasks) at = Math.min(at, task.at);
+    for (const w of this.waits) at = Math.min(at, w.at);
+    return Math.max(0, at - this.t);
+  }
+
+  /**
+   * Jumps the clock over a gap in which no particle is alive (the frame loop sleeps through it),
+   * at most to the next due emitter, then runs whatever is due. Uncapped, unlike `step`: nothing
+   * on screen skips. Does nothing while particles are alive.
+   */
+  skip(ms: number): void {
+    if (this.live > 0) return;
+    this.t += Math.min(Math.max(0, ms), this.nextDue);
+    this.step(0);
+  }
+
   /** A gold and cream burst at (x, y), viewport px: one flash, 11 twinkling stars, 12 glints. */
   sparkle(x: number, y: number): void {
     const { u, rand } = this;
@@ -274,9 +293,9 @@ export class FxEngine {
     this.tasks.push({ at, run });
   }
 
-  /** A fresh particle from the pool, or null when all MAX_PARTICLES are alive. */
+  /** A fresh particle from the pool, or null when every slot not reserved for a rocket's burst is alive. */
   private spawn(kind: number, color: number, x: number, y: number, vx: number, vy: number, size: number, life: number): Particle | null {
-    if (this.live >= MAX_PARTICLES) return null;
+    if (this.live + this.reserved >= MAX_PARTICLES) return null;
     const p = this.pool[this.live++]!;
     p.kind = kind;
     p.color = color;
@@ -600,6 +619,9 @@ export function createFx(root: HTMLElement): Fx {
   let art: Art | null = null;
   let raf = 0;
   let last = -1;
+  /** While no particle is alive but an emitter is pending: the wake-up timer, and when sleep began. */
+  let sleep = 0;
+  let sleptAt = 0;
   let dpr = 1;
   let destroyed = false;
   let vw = innerWidth;
@@ -616,6 +638,21 @@ export function createFx(root: HTMLElement): Fx {
     engine.resize(vw, vh);
   };
 
+  /** Ends a sleep early: the effect clock catches up on the time slept, running what fell due. */
+  const rouse = (): void => {
+    if (!sleep) return;
+    clearTimeout(sleep);
+    sleep = 0;
+    engine.skip(performance.now() - sleptAt);
+  };
+
+  const wake = (): void => {
+    sleep = 0;
+    engine.skip(performance.now() - sleptAt);
+    run();
+  };
+
+  /** Frames run only while particles are alive; a gap before the next emission sleeps on a timer. */
   const frame = (now: number): void => {
     raf = 0;
     if (last >= 0) engine.step(now - last);
@@ -625,21 +662,29 @@ export function createFx(root: HTMLElement): Fx {
       art ??= makeArt();
       drawParticles(ctx, engine, dpr, art);
     } else ctx?.clearRect(0, 0, canvas.width, canvas.height);
-    if (engine.active) raf = requestAnimationFrame(frame);
-    else canvas.hidden = true;
+    if (engine.live > 0) {
+      raf = requestAnimationFrame(frame);
+      return;
+    }
+    canvas.hidden = true;
+    if (engine.active) {
+      sleptAt = performance.now();
+      sleep = window.setTimeout(wake, engine.nextDue);
+    }
   };
 
   const run = (): void => {
-    if (destroyed || raf || document.visibilityState === 'hidden') return;
+    if (destroyed || raf || sleep || document.visibilityState === 'hidden') return;
     canvas.hidden = false;
     last = -1;
     raf = requestAnimationFrame(frame);
   };
 
-  /** Before spawning: the engine must know the current viewport. */
+  /** Before spawning: the engine must know the current viewport and be awake. */
   const ready = (): boolean => {
     if (destroyed || matchMedia('(prefers-reduced-motion: reduce)').matches) return false;
     if (resized) fit();
+    rouse();
     return true;
   };
 
@@ -653,6 +698,7 @@ export function createFx(root: HTMLElement): Fx {
     if (document.visibilityState === 'hidden') {
       if (raf) cancelAnimationFrame(raf);
       raf = 0;
+      rouse(); // the clock pauses while hidden, like the frames
     } else if (engine.active) run();
   };
 
@@ -682,6 +728,8 @@ export function createFx(root: HTMLElement): Fx {
       destroyed = true;
       if (raf) cancelAnimationFrame(raf);
       raf = 0;
+      clearTimeout(sleep);
+      sleep = 0;
       removeEventListener('resize', onResize);
       document.removeEventListener('visibilitychange', onVisibility);
       engine.destroy();

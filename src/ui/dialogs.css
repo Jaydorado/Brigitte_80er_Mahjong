@@ -77,8 +77,8 @@
   justify-content: center;
   gap: 10px;
   box-sizing: border-box;
-  min-width: 48px;
-  min-height: 52px;
+  min-width: 56px;
+  min-height: 56px;
   padding: 0 24px;
   border: 2.5px solid var(--berry, #8e2f4f);
   border-radius: 999px;
