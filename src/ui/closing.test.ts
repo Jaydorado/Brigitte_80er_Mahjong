@@ -6,7 +6,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { reveal } from '../content';
 import { freshSave, markWon, type SaveV1 } from '../progress/save';
-import { createShowLoop, mountClosing } from './closing'; // vi.mock calls below are hoisted above this import
+import { createShowLoop, mountClosing, settleClosingHistory } from './closing'; // vi.mock calls below are hoisted above this import
 
 const h = vi.hoisted(() => {
   type Listener = (ev: Record<string, unknown>) => void;
@@ -269,7 +269,7 @@ describe('closing riddle', () => {
     late.unmount();
   });
 
-  it('plays no burst under reduced motion and shows the photo as soon as it is decoded', async () => {
+  it('plays no burst and no fade under reduced motion: the photo is fully there as soon as it is decoded', async () => {
     h.reduced = true;
     const { root, unmount } = mount(won);
     answer(root, 'Gmunden');
@@ -277,6 +277,11 @@ describe('closing riddle', () => {
     await decoded();
     expect(photoShown(root)).toBe(true);
     expect(h.log.some((l) => l.startsWith('fireworks#'))).toBe(false);
+    expect(h.animations).toEqual([]); // no opacity transition: nothing starts transparent
+    const view = walk(root).find((e) => e.className === 'closing-photo')!;
+    const inView = (e: FakeEl | null): boolean => e !== null && (e === view || inView(e.parent));
+    const screen = root.children[0] as FakeEl;
+    expect(visible(root).filter((e) => e !== root && e !== screen && !inView(e))).toEqual([]);
     unmount();
   });
 
@@ -345,6 +350,55 @@ describe('closing riddle', () => {
     expect(onBack).toHaveBeenCalledTimes(1);
     second.unmount();
     expect(h.winListeners.get('popstate')?.size ?? 0).toBe(0);
+  });
+
+  describe('a closing entry left behind by a reload', () => {
+    const popstate = (): void => {
+      for (const fn of [...(h.winListeners.get('popstate') ?? [])]) fn({ type: 'popstate' });
+    };
+    function stubHistory(state: unknown): { state: unknown; back: ReturnType<typeof vi.fn>; replaceState: ReturnType<typeof vi.fn> } {
+      const hist = { state, back: vi.fn(), replaceState: vi.fn((s: unknown) => (hist.state = s)) };
+      vi.stubGlobal('history', hist);
+      return hist;
+    }
+
+    it('boots at once on an ordinary entry', () => {
+      const hist = stubHistory({ mahjong80Level: 3 });
+      const start = vi.fn();
+      settleClosingHistory(start);
+      expect(start).toHaveBeenCalledTimes(1);
+      expect(hist.back).not.toHaveBeenCalled();
+      expect(hist.replaceState).not.toHaveBeenCalled();
+    });
+
+    it('pops it before booting, so the map sits on the entry below and later Backs reach their own listeners', async () => {
+      const hist = stubHistory({ mahjong80Closing: true });
+      const start = vi.fn();
+      settleClosingHistory(start);
+      expect(hist.back).toHaveBeenCalledTimes(1);
+      expect(start).not.toHaveBeenCalled(); // nothing mounted yet that could take the pop for a Back
+      hist.state = null;
+      popstate();
+      expect(start).toHaveBeenCalledTimes(1);
+      expect(h.winListeners.get('popstate')?.size ?? 0).toBe(0);
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(start).toHaveBeenCalledTimes(1);
+      expect(hist.replaceState).not.toHaveBeenCalled();
+    });
+
+    it('boots anyway on a plain entry when the pop never arrives', async () => {
+      const hist = stubHistory({ mahjong80Closing: true });
+      const start = vi.fn();
+      settleClosingHistory(start);
+      await vi.advanceTimersByTimeAsync(999);
+      expect(start).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(start).toHaveBeenCalledTimes(1);
+      expect(hist.state).toBeNull();
+      popstate();
+      expect(start).toHaveBeenCalledTimes(1);
+      expect(h.winListeners.get('popstate')?.size ?? 0).toBe(0);
+    });
   });
 });
 

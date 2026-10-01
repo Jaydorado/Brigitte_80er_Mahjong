@@ -50,6 +50,36 @@ const KEYBOARD_SLACK_PX = 50;
 /** The key the closing screen puts on the history entry it pushes, so system Back leads to the map. */
 const HISTORY_KEY = 'mahjong80Closing';
 
+/** How long boot waits for the pop of a stale closing entry before it gives up and boots in place. */
+const STALE_POP_WAIT_MS = 1000;
+
+/**
+ * Boot step (main.ts): runs `start` once the history entry is settled. A reload while the closing
+ * screen is open boots into the map but leaves the closing entry (and its key) on top of the map's
+ * own; Back from the map would then land on that dead entry, and a later *Zur Torte* would pop back
+ * to it. So that entry is popped first, and the app starts only after its `popstate`, so no screen
+ * mounted in the meantime takes that pop for a Back. Should the pop never arrive (no entry below),
+ * the entry is made plain and the app starts anyway.
+ */
+export function settleClosingHistory(start: () => void): void {
+  if ((history.state as Record<string, unknown> | null)?.[HISTORY_KEY] !== true) {
+    start();
+    return;
+  }
+  let started = false;
+  const go = (): void => {
+    if (started) return;
+    started = true;
+    clearTimeout(fallback);
+    window.removeEventListener('popstate', go);
+    if ((history.state as Record<string, unknown> | null)?.[HISTORY_KEY] === true) history.replaceState(null, '');
+    start();
+  };
+  const fallback = window.setTimeout(go, STALE_POP_WAIT_MS);
+  window.addEventListener('popstate', go);
+  history.back();
+}
+
 export interface ClosingOpts {
   /** The progress at mount: `solved` decides between the answer region and *Das Geheimnis*. */
   save: SaveV1;
@@ -332,14 +362,20 @@ export function mountClosing(root: HTMLElement, opts: ClosingOpts): () => void {
     view.append(img, plaque, photoCredit, photoBack);
     // Nothing may run on under the photo: the cake's flames, glows and sparkles loop forever. Frozen
     // while the photo fades in over them, then out of rendering. The photo only ever leaves for the map
-    // (a fresh mount), so they never need to come back.
+    // (a fresh mount), so they never need to come back. Under reduced motion there is no fade: the
+    // photo is there at once and the content under it leaves rendering at once.
     const under = [bunting, body];
+    const hideUnder = (): void => {
+      for (const el of under) el.hidden = true;
+    };
     for (const el of under) el.classList.add('is-paused');
     screen.append(view);
+    if (reducedMotion()) {
+      hideUnder();
+      return;
+    }
     view.animate([{ opacity: 0 }, { opacity: 1 }], { duration: PHOTO_FADE_MS, easing: 'ease-out' }).finished.then(
-      () => {
-        for (const el of under) el.hidden = true;
-      },
+      hideUnder,
       () => {}, // cancelled by the unmount: the screen is gone anyway
     );
   }
