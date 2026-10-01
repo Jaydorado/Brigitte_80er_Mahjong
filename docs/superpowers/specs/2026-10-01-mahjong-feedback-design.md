@@ -91,9 +91,9 @@ After the level-8 letter, the closing screen shows the eight clues (as today) an
   - the final text from `content.ts` `reveal` (new export), a heading plus a message.
 - The photo is resized at build time to 1280 px on the long edge, WebP at quality ≤ 80, ≤ 200 KB. It is committed under `public/` and precached, so it works offline.
   - The builder records the source URL, author and licence in `public/photo-credit.md` and in the credit line.
-- Draft text (the family may change it; it's covered by the `TEXTS_FINAL` gate):
+- Text (from Jay, 2026-10-01; still covered by the `TEXTS_FINAL` gate):
   - `reveal.title`: "Wir fahren nach Gmunden!"
-  - `reveal.message`: "Gemeinsam geht die Reise an den Traunsee, ins Seeschloss Ort. Wir freuen uns so sehr darauf!"
+  - `reveal.message`: "Wir freuen uns auf eine gemeinsame Zeit in Gmunden 😊" (Jay's wording; only "Zeit" and "Gmunden" are capitalised). The emoji uses the system emoji font, not the display font.
 - Back from the celebration goes to the cake map.
 - Perf: the photo is a plain `<img>`, decoded before the fade-in. There's no live effect on it beyond one opacity transition.
 
