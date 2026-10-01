@@ -4,8 +4,8 @@
  * fixed sleeps (one negative check, "a reload starts no tutorial", has to let a start delay pass).
  * Screenshots of every screen land in `smoke/screenshots/` (gitignored).
  */
-import type { Page, TestInfo } from '@playwright/test';
-import { clues, welcome } from '../src/content';
+import type { Locator, Page, TestInfo } from '@playwright/test';
+import { clues, reveal, welcome } from '../src/content';
 import { boot, expect, expectSynced, openLevel, readSave, seedSave, shot, stateOf, test } from './helpers';
 
 const hudCount = (page: Page) => page.locator('.level .hud-count span');
@@ -479,6 +479,232 @@ test('8 candles: the centre and the edge of every candle open that candle’s le
       await page.evaluate(() => history.back());
       await expect(page.locator('.screen.map')).toBeVisible();
     }
+  }
+});
+
+// ---------------------------------------------------------------- the riddle answer (spec §4, §5)
+
+const ALL_WON = Array.from({ length: clues.length }, (_, i) => i + 1);
+const answerField = (page: Page) => page.locator('.closing-answer .closing-input');
+const wrongLine = (page: Page) => page.locator('.closing-answer .closing-wrong');
+const revealBtn = (page: Page) => page.getByRole('button', { name: 'Auflösung zeigen' });
+const photoView = (page: Page) => page.locator('.closing-photo');
+
+/** From the map of a finished game to the closing screen, by tapping the topper as a player does. */
+async function openClosing(page: Page): Promise<void> {
+  await expect(page.locator('.screen.map')).toBeVisible();
+  // The active topper pulses, so it is never "stable" for Playwright's click: tap its box as a finger would.
+  const box = (await page.locator('.cake-topper-hit').boundingBox())!;
+  await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+  await expect(page.locator('.screen.closing')).toBeVisible();
+}
+
+async function submitAnswer(page: Page, text: string): Promise<void> {
+  await answerField(page).fill(text);
+  await answerField(page).press('Enter');
+}
+
+/** The photo view is up, once the fade is over: the decoded photo, the plaque, and the credit in the app. */
+async function expectPhotoView(page: Page): Promise<void> {
+  const view = photoView(page);
+  await expect(view).toBeVisible();
+  await expect
+    .poll(() => view.evaluate((el) => (el.getAnimations().length === 0 ? getComputedStyle(el).opacity : 'fading')))
+    .toBe('1');
+  const img = view.locator('.closing-photo-img');
+  await expect(img).toBeVisible();
+  const decoded = await img.evaluate((el: HTMLImageElement) => el.complete && el.naturalWidth > 0 && el.naturalHeight > 0);
+  expect(decoded, 'the photo is decoded').toBe(true);
+  await expect(view.locator('.closing-photo-title')).toHaveText(reveal.title);
+  await expect(view.locator('.closing-photo-message')).toHaveText(reveal.message);
+  const credit = view.locator('.closing-photo-credit');
+  await expect(credit).toBeVisible();
+  for (const part of ['Dimitry Anikin', 'CC0 1.0', 'Wikimedia Commons', 'verkleinert, als WebP gespeichert']) {
+    await expect(credit, `credit mentions ${part}`).toContainText(part);
+  }
+  await expect(credit.getByRole('link', { name: 'CC0 1.0' })).toHaveAttribute('href', /creativecommons\.org/);
+  await expect(credit.getByRole('link', { name: 'Wikimedia Commons' })).toHaveAttribute('href', /commons\.wikimedia\.org/);
+  await expect(view.getByRole('button', { name: 'Zur Torte' })).toBeVisible();
+}
+
+test('10 answer: wrong ×3 offers Auflösung zeigen; a correct answer shows the photo and its credit; the save keeps solved', async ({ page }, info) => {
+  await seedSave(page, { won: ALL_WON });
+  await page.goto('/');
+  await openClosing(page);
+  await expect(page.getByText('Wohin geht die Reise?')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Antworten' })).toBeVisible();
+  await expect(page.locator('.closing-clues li')).toHaveText([...clues]);
+  await expect(wrongLine(page)).toBeHidden();
+  await expect(revealBtn(page)).toBeHidden();
+  await shot(page, info, '10-answer-unsolved');
+
+  // The wrong line and the reveal button live inside the answer region; the button needs the third wrong try.
+  for (let tries = 1; tries <= 3; tries++) {
+    await submitAnswer(page, 'Wien');
+    await expect(wrongLine(page)).toBeVisible();
+    await expect(wrongLine(page)).toHaveText('Noch nicht ganz – schau dir die Hinweise nochmal an.');
+    if (tries < 3) await expect(revealBtn(page)).toBeHidden();
+  }
+  await expect(page.locator('.closing-answer').getByRole('button', { name: 'Auflösung zeigen' })).toBeVisible();
+  await shot(page, info, '10-answer-wrong-3');
+  expect((await readSave(page)).solved, 'the wrong-try counter and solved are not saved by wrong answers').toBeUndefined();
+
+  // Words around the answer count, accents do not matter; the save is written with the celebration.
+  await submitAnswer(page, 'Reise nach Gmünden!');
+  await expect.poll(async () => (await readSave(page)).solved).toBe(true);
+  await expectPhotoView(page);
+  await shot(page, info, '10-answer-photo');
+  expect((await readSave(page)).won).toEqual(ALL_WON);
+
+  // Reload: the riddle is solved, so Das Geheimnis stands in for the answer region and replays the photo.
+  await page.reload();
+  await openClosing(page);
+  await expect(answerField(page)).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Antworten' })).toHaveCount(0);
+  await expect(page.locator('.closing-clues li')).toHaveText([...clues]);
+  const secret = page.getByRole('button', { name: 'Das Geheimnis' });
+  await expect(secret).toBeVisible();
+  await shot(page, info, '10-geheimnis');
+  await secret.click();
+  await expectPhotoView(page);
+  expect((await readSave(page)).solved).toBe(true);
+
+  // Zur Torte leaves the photo view for the map; the closing screen is gone.
+  await photoView(page).getByRole('button', { name: 'Zur Torte' }).click();
+  await expect(page.locator('.screen.map')).toBeVisible();
+  await expect(page.locator('.screen.closing')).toHaveCount(0);
+});
+
+test('10 answer: Auflösung zeigen reveals the photo and saves solved', async ({ page }, info) => {
+  await seedSave(page, { won: ALL_WON });
+  await page.goto('/');
+  await openClosing(page);
+  for (let tries = 0; tries < 3; tries++) await submitAnswer(page, 'Salzburg');
+  await revealBtn(page).click();
+  await expect.poll(async () => (await readSave(page)).solved).toBe(true);
+  await expectPhotoView(page);
+  await shot(page, info, '10-reveal-button-photo');
+});
+
+test('10 answer: with reduced motion the photo appears as soon as it is decoded', async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await seedSave(page, { won: ALL_WON });
+  await page.goto('/');
+  await openClosing(page);
+  await submitAnswer(page, 'Gmunden');
+  await expectPhotoView(page);
+});
+
+for (const how of ['Zur Torte', 'system Back'] as const) {
+  test(`10 answer: leaving by ${how} during the burst and the decode leaves no errors and no photo view`, async ({ page }) => {
+    await seedSave(page, { won: ALL_WON });
+    await page.goto('/');
+    await openClosing(page);
+    await submitAnswer(page, 'Gmunden');
+    // Straight away: the burst has started, the photo may still be decoding or waiting out its first second.
+    await expect.poll(async () => (await readSave(page)).solved, { message: 'solved is written before the celebration' }).toBe(true);
+    if (how === 'Zur Torte') await page.locator('.closing-back').click();
+    else await page.evaluate(() => history.back());
+    await expect(page.locator('.screen.map')).toBeVisible();
+    await expect(page.locator('.screen.closing')).toHaveCount(0);
+    // The photo view would come 1 s after the burst began, and the burst ends within 3 s: dwell past both
+    // (a negative check has to let the cancelled timers and callbacks pass). The fixture then checks for errors.
+    await page.waitForTimeout(3500);
+    await expect(photoView(page)).toHaveCount(0);
+    await expect(page.locator('.screen.map')).toBeVisible();
+    await expect(page.locator('.fx-canvas:not([hidden])')).toHaveCount(0);
+  });
+}
+
+// Keyboard-height viewport: with the on-screen keyboard up in landscape only ~180 px are left.
+test('10 answer: at 640×180 the whole answer region is visible, with the field focused', async ({ page }, info) => {
+  await page.setViewportSize({ width: 640, height: 180 });
+  await seedSave(page, { won: ALL_WON });
+  await page.goto('/');
+  await openClosing(page);
+  await answerField(page).focus();
+  const region = page.locator('.closing-answer');
+  const inView = async (name: string, loc: Locator) => {
+    await expect(loc, name).toBeVisible();
+    const box = (await loc.boundingBox())!;
+    expect(box.y, `${name} top`).toBeGreaterThanOrEqual(0);
+    expect(box.y + box.height, `${name} bottom`).toBeLessThanOrEqual(180 + 0.5);
+    expect(box.x, `${name} left`).toBeGreaterThanOrEqual(0);
+    expect(box.x + box.width, `${name} right`).toBeLessThanOrEqual(640 + 0.5);
+  };
+  await inView('question', page.getByText('Wohin geht die Reise?'));
+  await inView('field', answerField(page));
+  await inView('Antworten', page.getByRole('button', { name: 'Antworten' }));
+  await inView('answer region', region);
+  await shot(page, info, '10-answer-640x180');
+
+  // Everything the region can show, at the lowest height: the wrong line and the reveal button too.
+  for (let tries = 0; tries < 3; tries++) await submitAnswer(page, 'Linz');
+  await inView('wrong line', wrongLine(page));
+  await inView('Auflösung zeigen', revealBtn(page));
+  await inView('answer region with feedback', region);
+  await inView('field with feedback', answerField(page));
+  await shot(page, info, '10-answer-640x180-wrong');
+  expect(await noHorizontalOverflow(page), 'the closing screen overflows sideways at 640×180').toBe(true);
+});
+
+// ---------------------------------------------------------------- offline first reveal
+
+/** Service worker active and controlling the page (after a reload), the photo never requested by the page. */
+async function warmServiceWorker(page: Page): Promise<string[]> {
+  const photoRequests: string[] = [];
+  page.on('request', (r) => {
+    if (/seeschloss-ort\.webp/.test(r.url())) photoRequests.push(r.url());
+  });
+  await page.goto('/');
+  await expect(page.locator('.screen.map')).toBeVisible();
+  await expect
+    .poll(() => page.evaluate(async () => (await navigator.serviceWorker.ready).active?.state))
+    .toBe('activated');
+  await page.reload();
+  await expect(page.locator('.screen.map')).toBeVisible();
+  await expect.poll(() => page.evaluate(() => navigator.serviceWorker.controller !== null)).toBe(true);
+  expect(photoRequests, 'the page must not have requested the photo yet').toEqual([]);
+  // Offline it can only come from the service worker's precache, so check it is there (the worker fetched it, not the page).
+  const precached = await page.evaluate(async () => {
+    for (const name of await caches.keys()) {
+      const keys = await (await caches.open(name)).keys();
+      if (keys.some((r) => /seeschloss-ort\.webp/.test(r.url))) return true;
+    }
+    return false;
+  });
+  expect(precached, 'the photo is in the service worker precache').toBe(true);
+  return photoRequests;
+}
+
+test('11 offline first reveal: the correct answer shows the decoded photo and its credit', async ({ page, context }, info) => {
+  await seedSave(page, { won: ALL_WON });
+  const photoRequests = await warmServiceWorker(page);
+  await context.setOffline(true);
+  try {
+    await openClosing(page);
+    await submitAnswer(page, 'Schloss Ort');
+    await expectPhotoView(page);
+    expect(photoRequests.length, 'the photo was requested only now, offline').toBeGreaterThan(0);
+    await shot(page, info, '11-offline-answer-photo');
+  } finally {
+    await context.setOffline(false);
+  }
+});
+
+test('11 offline first reveal: Auflösung zeigen shows the decoded photo and its credit', async ({ page, context }, info) => {
+  await seedSave(page, { won: ALL_WON });
+  const photoRequests = await warmServiceWorker(page);
+  await context.setOffline(true);
+  try {
+    await openClosing(page);
+    for (let tries = 0; tries < 3; tries++) await submitAnswer(page, 'Graz');
+    await revealBtn(page).click();
+    await expectPhotoView(page);
+    expect(photoRequests.length, 'the photo was requested only now, offline').toBeGreaterThan(0);
+    await shot(page, info, '11-offline-reveal-photo');
+  } finally {
+    await context.setOffline(false);
   }
 });
 
