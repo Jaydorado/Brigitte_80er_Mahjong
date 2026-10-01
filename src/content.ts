@@ -13,8 +13,10 @@ export const clues = [
 
 export const welcome = {
   title: 'Alles Gute zum 80. Geburtstag!',
+  // Zwei Absätze, getrennt durch eine Leerzeile (\n\n).
   message:
-    'Wir haben dir ein kleines Spiel gebaut, ganz für dich allein. In jedem Level versteckt sich unter den Steinen ein Hinweis auf dein Geschenk. Nimm dir Zeit, es gibt keine Eile. Viel Freude beim Rätseln!',
+    'Jetzt kannst – oder besser gesagt: musst – du beweisen, wie geistig fit du auch mit 80 noch bist.\n\n' +
+    'Jedes erfolgreich absolvierte Level eines dir wohlbekannten Spieles liefert dir einen Hinweis und bringt dich deinem Geschenk ein Stück näher.',
 };
 
 export const finale =
