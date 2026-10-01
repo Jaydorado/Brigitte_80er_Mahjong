@@ -10,7 +10,7 @@
 const NS = 'http://www.w3.org/2000/svg';
 
 const T = {
-  cakeLabel: 'Geburtstagstorte mit sechs Kerzen',
+  cakeLabel: 'Geburtstagstorte mit acht Kerzen',
 };
 
 const f = (n: number): string => String(Math.round(n * 10) / 10);
@@ -69,9 +69,11 @@ interface Tier {
 }
 
 const CX = 300;
-const TOP: Tier = { cx: CX, cy: 134, rx: 170, ry: 24, h: 62 };
-const MID: Tier = { cx: CX, cy: 196, rx: 225, ry: 27, h: 52 };
-const BOT: Tier = { cx: CX, cy: 248, rx: 275, ry: 30, h: 50 };
+// The top tier carries eight 52 px candle targets (gap 54, wax out to x = ±189 from the centre), so
+// its radius is 210; the lower tiers step out from it and still sit inside the 600-wide viewBox.
+const TOP: Tier = { cx: CX, cy: 134, rx: 210, ry: 26, h: 62 };
+const MID: Tier = { cx: CX, cy: 196, rx: 245, ry: 28, h: 52 };
+const BOT: Tier = { cx: CX, cy: 248, rx: 280, ry: 30, h: 50 };
 
 /** y of the front rim of a tier's top face at x. */
 function rimY(t: Tier, x: number): number {
@@ -216,21 +218,29 @@ export interface CakeCandle {
 
 export interface CakeArt {
   readonly svg: SVGSVGElement;
-  /** The six candles, level 1 first. */
+  /** The eight candles, level 1 first. */
   readonly candles: readonly CakeCandle[];
-  /** The gold "80" topper; `is-active` once all six are won. */
+  /** The gold "80" topper; `is-active` once all eight are won. */
   readonly topper: SVGGElement;
   /** Tap target for the topper. */
   readonly topperHit: SVGRectElement;
 }
 
-const CANDLE_COUNT = 6;
-const CANDLE_GAP = 56;
+const CANDLE_COUNT = 8;
+/** Centre-to-centre distance; the 52-wide hit rectangles then never overlap (2 px apart). */
+const CANDLE_GAP = 54;
+
+/** Centre x of candle `i` (0-based), in viewBox units. */
+function candleX(i: number): number {
+  return CX + (i - (CANDLE_COUNT - 1) / 2) * CANDLE_GAP;
+}
 
 function candleMarkup(p: string, i: number): string {
-  const x = CX + (i - (CANDLE_COUNT - 1) / 2) * CANDLE_GAP;
+  const x = candleX(i);
   const dx = Math.abs(x - CX);
-  const y = TOP.cy + 10 - 10 * (dx / 140) ** 2;
+  // The base sits on the front half of the top face, following the ellipse so even the outermost wax
+  // body (7.5 px half-width, plus the shadow) stays on the tier.
+  const y = TOP.cy + 0.55 * TOP.ry * Math.sqrt(1 - ((dx + 12) / TOP.rx) ** 2);
   const ey = rimY(TOP, x) + 31 - y; // centre of the envelope / number badge, slot-local
   const stripe = i % 2 === 0 ? '#e89aa8' : '#d9b26f';
   let stripes = '';
@@ -258,7 +268,7 @@ function candleMarkup(p: string, i: number): string {
     `</g></g>` +
     `</g>` +
     `<g class="cake-hit" fill="#000" fill-opacity="0">` +
-    `<rect x="-26" y="-94" width="52" height="104"/>` +
+    `<rect x="-26" y="-78" width="52" height="88"/>` +
     `<rect x="-26" y="${f(ey - 24)}" width="52" height="48"/>` +
     `</g>` +
     `<g class="cake-num" aria-hidden="true" transform="translate(0 ${f(ey)})">` +
@@ -280,7 +290,7 @@ function candleMarkup(p: string, i: number): string {
 
 function buildCakeArt(mini: boolean): CakeArt {
   const p = `ck${++buildCount}-`;
-  const candleXs = Array.from({ length: CANDLE_COUNT }, (_, i) => CX + (i - (CANDLE_COUNT - 1) / 2) * CANDLE_GAP);
+  const candleXs = Array.from({ length: CANDLE_COUNT }, (_, i) => candleX(i));
 
   const defs =
     `<defs>` +
@@ -308,15 +318,20 @@ function buildCakeArt(mini: boolean): CakeArt {
     `<clipPath id="${p}clipMid"><path d="${bodyPath(MID)}"/></clipPath>` +
     `</defs>`;
 
+  // The drip offsets were drawn for the earlier, narrower tiers; `k` carries them out to the new radii.
+  const spread = (list: readonly (readonly number[])[], k: number, hw: number) =>
+    list.map(([dx, len, w]) => ({ dx: dx! * k, len: len!, hw: w ?? hw }));
   const drips = {
-    top: [[-112, 16], [-56, 24], [0, 14], [56, 22], [112, 17]].map(([dx, len]) => ({ dx: dx!, len: len!, hw: 5 })),
-    mid: [[-205, 14, 5], [-170, 22, 6], [-128, 12, 5], [-88, 18, 5.5], [88, 20, 6], [130, 13, 5], [172, 22, 6], [208, 15, 5]].map(
-      ([dx, len, hw]) => ({ dx: dx!, len: len!, hw: hw! }),
+    top: spread([[-190, 15], [-138, 16], [-69, 24], [0, 14], [69, 22], [138, 17], [190, 19]], 1, 5),
+    mid: spread([[-205, 14, 5], [-170, 22, 6], [-128, 12, 5], [-88, 18, 5.5], [88, 20, 6], [130, 13, 5], [172, 22, 6], [208, 15, 5]], 245 / 225, 5),
+    bot: spread(
+      [
+        [-255, 13], [-222, 20], [-188, 12], [-150, 20], [-112, 14], [-70, 19], [-25, 12],
+        [22, 20], [68, 14], [108, 20], [147, 12], [186, 19], [222, 14], [254, 18],
+      ],
+      280 / 275,
+      5.5,
     ),
-    bot: [
-      [-255, 13], [-222, 20], [-188, 12], [-150, 20], [-112, 14], [-70, 19], [-25, 12],
-      [22, 20], [68, 14], [108, 20], [147, 12], [186, 19], [222, 14], [254, 18],
-    ].map(([dx, len]) => ({ dx: dx!, len: len!, hw: 5.5 })),
   };
 
   const rimStroke = (t: Tier): string =>
@@ -338,8 +353,8 @@ function buildCakeArt(mini: boolean): CakeArt {
   // Bottom tier: rose body, cream icing, swags
   let swags = '';
   for (let k = 0; k < 10; k++) {
-    const x0 = CX - 250 + k * 50;
-    const x1 = x0 + 50;
+    const x0 = CX - 255 + k * 51;
+    const x1 = x0 + 51;
     const off = 30;
     const y0 = rimY(BOT, x0) + off;
     const y1 = rimY(BOT, x1) + off;
@@ -350,7 +365,7 @@ function buildCakeArt(mini: boolean): CakeArt {
     swags += `<path d="${d}" fill="none" stroke="#fff8ee" stroke-width="4.6" stroke-linecap="round"/>`;
   }
   for (let k = 0; k <= 10; k++) {
-    const x = CX - 250 + k * 50;
+    const x = CX - 255 + k * 51;
     swags += `<circle cx="${x}" cy="${f(rimY(BOT, x) + 30)}" r="4.4" fill="url(#${p}pearl)"/>`;
   }
   const bot =
@@ -362,7 +377,7 @@ function buildCakeArt(mini: boolean): CakeArt {
     `<path d="${icingPath(BOT, 7, drips.bot)}" transform="translate(0 3)" fill="#3a1f2b" opacity=".2"/>` +
     `<path d="${icingPath(BOT, 7, drips.bot)}" fill="url(#${p}iceBot)"/>` +
     rimStroke(BOT) +
-    sprinkles({ t: BOT, upper: MID, count: 70, seed: 7, colors: ['#d9b26f', '#e89aa8', '#8e2f4f', '#f3d58e', '#c96a86'] });
+    sprinkles({ t: BOT, upper: MID, count: 74, seed: 7, colors: ['#d9b26f', '#e89aa8', '#8e2f4f', '#f3d58e', '#c96a86'] });
 
   // Middle tier: cream body, rose icing, berry ribbon with bow
   const ribbonTop: string[] = [];
@@ -400,7 +415,7 @@ function buildCakeArt(mini: boolean): CakeArt {
     `<path d="${icingPath(MID, 6, drips.mid)}" transform="translate(0 3)" fill="#3a1f2b" opacity=".2"/>` +
     `<path d="${icingPath(MID, 6, drips.mid)}" fill="url(#${p}iceMid)"/>` +
     rimStroke(MID) +
-    sprinkles({ t: MID, upper: TOP, count: 46, seed: 21, colors: ['#d9b26f', '#fff8ee', '#8e2f4f', '#f3d58e', '#fff8ee'] });
+    sprinkles({ t: MID, upper: TOP, count: 54, seed: 21, colors: ['#d9b26f', '#fff8ee', '#8e2f4f', '#f3d58e', '#fff8ee'] });
 
   // Top tier: berry body, cream icing; candles and envelopes stand on / under it
   const top =
@@ -412,7 +427,7 @@ function buildCakeArt(mini: boolean): CakeArt {
     `<path d="${icingPath(TOP, 7, drips.top)}" transform="translate(0 3)" fill="#3a1f2b" opacity=".2"/>` +
     `<path d="${icingPath(TOP, 7, drips.top)}" fill="url(#${p}iceTop)"/>` +
     rimStroke(TOP) +
-    sprinkles({ t: TOP, upper: null, count: 16, seed: 5, colors: ['#d9b26f', '#e89aa8', '#8e2f4f', '#f3d58e'], avoidX: candleXs });
+    sprinkles({ t: TOP, upper: null, count: 20, seed: 5, colors: ['#d9b26f', '#e89aa8', '#8e2f4f', '#f3d58e'], avoidX: candleXs });
 
   const topper =
     `<g class="cake-topper">` +
@@ -430,7 +445,7 @@ function buildCakeArt(mini: boolean): CakeArt {
 
   const sparkles =
     [
-      [70, 110, 1.1, 0], [48, 190, 0.8, 0.7], [530, 120, 1, 1.3], [552, 204, 1.2, 0.4],
+      [70, 110, 1.1, 0], [32, 190, 0.8, 0.7], [530, 120, 1, 1.3], [568, 204, 1.2, 0.4],
       [118, 56, 0.8, 1.7], [490, 64, 0.9, 2.1], [34, 272, 0.7, 1.1], [566, 282, 0.8, 1.9],
     ]
       .map(([x, y, s, d]) => sparkleStar(x!, y!, s!, d!, `${p}gold`))
@@ -469,7 +484,7 @@ export function buildCake(): CakeArt {
   return buildCakeArt(false);
 }
 
-/** The closing screen's small cake: all six candles lit, no taps. */
+/** The closing screen's small cake: all eight candles lit, no taps. */
 export function buildMiniCake(): CakeArt {
   return buildCakeArt(true);
 }

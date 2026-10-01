@@ -18,6 +18,9 @@ export type Screen =
 /** The key levelScreen puts on the history entry it pushes (see `HISTORY_KEY` there). */
 const LEVEL_HISTORY_KEY = 'mahjong80Level';
 
+/** The last level: its first win leads to the closing screen. */
+const FINAL_LEVEL = 8;
+
 interface Host {
   readonly root: HTMLElement;
   readonly storage: Storage;
@@ -95,7 +98,7 @@ function mount(root: HTMLElement, s: Screen): () => void {
           if ((history.state as Record<string, unknown> | null)?.[LEVEL_HISTORY_KEY] !== undefined) history.back();
           persist(markWon(save, id));
           litAfterLetter = id;
-          show({ name: 'letter', id, next: id === 6 && firstWin ? 'closing' : 'map' });
+          show({ name: 'letter', id, next: id === FINAL_LEVEL && firstWin ? 'closing' : 'map' });
         },
       });
     }

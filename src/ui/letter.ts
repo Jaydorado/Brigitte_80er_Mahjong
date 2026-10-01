@@ -8,7 +8,7 @@ const T = {
 };
 
 export interface LetterOpts {
-  /** Level id 1–6; picks the clue and the title "Hinweis N von 6". */
+  /** Level id 1–8; picks the clue and the title "Hinweis N von 8". */
   readonly id: number;
   /** *Weiter*: the router decides between map (with `lit`) and closing. */
   onNext(): void;

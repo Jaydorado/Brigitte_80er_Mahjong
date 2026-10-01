@@ -919,6 +919,7 @@
   font: 400 22px/1.2 var(--font-display, Georgia, serif);
   color: var(--plum);
   overflow-wrap: anywhere;
+  animation: closing-fade 0.6s calc(0.7s + var(--i, 0) * 0.25s) both;
 }
 
 .closing-clues li::before {
@@ -933,25 +934,6 @@
   color: var(--cream);
   font: 700 17px/1 var(--font-display, Georgia, serif);
   transform: translateY(-2px);
-}
-
-.closing-clues li:nth-child(1) {
-  animation: closing-fade 0.6s 0.7s both;
-}
-.closing-clues li:nth-child(2) {
-  animation: closing-fade 0.6s 0.95s both;
-}
-.closing-clues li:nth-child(3) {
-  animation: closing-fade 0.6s 1.2s both;
-}
-.closing-clues li:nth-child(4) {
-  animation: closing-fade 0.6s 1.45s both;
-}
-.closing-clues li:nth-child(5) {
-  animation: closing-fade 0.6s 1.7s both;
-}
-.closing-clues li:nth-child(6) {
-  animation: closing-fade 0.6s 1.95s both;
 }
 
 .closing-side {

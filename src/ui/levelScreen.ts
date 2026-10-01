@@ -47,6 +47,8 @@ const THEMES: readonly { sky: readonly [string, string, string]; flags: readonly
   { sky: ['#EAF4FC', '#BDDBF3', '#83B4DE'], flags: ['#8E2F4F', '#FFF8EE', '#D9B26F', '#E89AA8', '#4E86B8'], string: '#34587A' },
   { sky: ['#FEF5E1', '#F3DBA6', '#D9AB5F'], flags: ['#8E2F4F', '#FFF8EE', '#E89AA8', '#B07A2A', '#6E8F5A'], string: '#7A5A2A' },
   { sky: ['#F8DDE6', '#C97A96', '#7A2544'], flags: ['#D9B26F', '#FFF8EE', '#E89AA8', '#F4D58D', '#C75C7A'], string: '#F0D9A8' },
+  { sky: ['#EFF8EE', '#C8E4CC', '#86B993'], flags: ['#8E2F4F', '#FFF8EE', '#D9B26F', '#E89AA8', '#4F8F6A'], string: '#3F6A4D' },
+  { sky: ['#E7F7F5', '#9EDCD6', '#44A0A6'], flags: ['#8E2F4F', '#FFF8EE', '#D9B26F', '#F2C6CF', '#2F7F88'], string: '#245E66' },
 ];
 
 const r1 = (v: number) => Math.round(v * 10) / 10;

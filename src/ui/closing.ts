@@ -5,7 +5,7 @@ import './screens.css';
 
 // Fixed interface labels (the family texts live in content.ts).
 const T = {
-  heading: 'Deine sechs Hinweise',
+  heading: 'Deine acht Hinweise',
   back: 'Zur Torte',
 };
 
@@ -92,11 +92,12 @@ export function mountClosing(root: HTMLElement, opts: ClosingOpts): () => void {
   heading.textContent = T.heading;
   const list = document.createElement('ol');
   list.className = 'closing-clues';
-  for (const clue of clues) {
+  clues.forEach((clue, i) => {
     const li = document.createElement('li');
     li.textContent = clue;
+    li.style.setProperty('--i', String(i));
     list.append(li);
-  }
+  });
   parchment.append(heading, list);
 
   const side = document.createElement('div');
