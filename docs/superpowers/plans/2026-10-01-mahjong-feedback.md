@@ -1,3 +1,5 @@
+> **Late addition (Jay, 2026-10-01, after the loop started):** spec §3 now includes a new two-paragraph `welcome.message`. `content.ts` belongs to F2a; rendering the paragraph break and fitting the screen in `src/ui/welcome.ts` and `screens.css` belongs to F2b. If F2a/F2b have already landed, the controller dispatches a small follow-up to the same builders.
+
 # Mahjong feedback round 1 — implementation plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: superpowers:subagent-driven-development. Each task goes to the builder named in its header. Steps use checkbox syntax.

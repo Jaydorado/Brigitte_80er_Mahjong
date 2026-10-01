@@ -105,6 +105,15 @@ Shrinking the gap alone can't work: eight 52 px targets on the current top tier 
 
 `welcome.title` becomes **"Alles Gute zum 80. Geburtstag!"**. The app name and the manifest stay as they are.
 
+`welcome.message` (Jay, 2026-10-01, verbatim) is two paragraphs:
+
+> Jetzt kannst – oder besser gesagt: musst – du beweisen, wie geistig fit du auch mit 80 noch bist.
+>
+> Jedes erfolgreich absolvierte Level eines dir wohlbekannten Spieles liefert dir einen Hinweis und bringt dich deinem Geschenk ein Stück näher.
+
+- The welcome screen renders the paragraph break: the message is split on `\n\n` into `<p>` elements.
+- The longer text must still fit the welcome screen at 640×360. The left column currently has about 4 px to spare, so the welcome layout may scroll or reflow; the text size stays at the inherited floor.
+
 ## 4. The riddle answer
 
 After the level-8 letter, the closing screen shows the eight clues and the answer region:
