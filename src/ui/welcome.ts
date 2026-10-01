@@ -146,11 +146,16 @@ export function mountWelcome(root: HTMLElement, opts: WelcomeOpts): () => void {
 
   const text = document.createElement('div');
   text.className = 'welcome-text';
-  const message = document.createElement('p');
-  message.className = 'welcome-message';
-  message.textContent = welcome.message;
   const installHost = document.createElement('div');
-  text.append(message, installHost);
+  text.append(
+    ...welcome.message.split('\n\n').map((para) => {
+      const p = document.createElement('p');
+      p.className = 'welcome-message';
+      p.textContent = para;
+      return p;
+    }),
+    installHost,
+  );
 
   scroll.append(bunting, hero, text);
 
