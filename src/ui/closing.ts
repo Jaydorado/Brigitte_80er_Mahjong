@@ -330,8 +330,18 @@ export function mountClosing(root: HTMLElement, opts: ClosingOpts): () => void {
     photoBack.type = 'button';
     photoBack.addEventListener('click', leave);
     view.append(img, plaque, photoCredit, photoBack);
+    // Nothing may run on under the photo: the cake's flames, glows and sparkles loop forever. Frozen
+    // while the photo fades in over them, then out of rendering. The photo only ever leaves for the map
+    // (a fresh mount), so they never need to come back.
+    const under = [bunting, body];
+    for (const el of under) el.classList.add('is-paused');
     screen.append(view);
-    view.animate([{ opacity: 0 }, { opacity: 1 }], { duration: PHOTO_FADE_MS, easing: 'ease-out' });
+    view.animate([{ opacity: 0 }, { opacity: 1 }], { duration: PHOTO_FADE_MS, easing: 'ease-out' }).finished.then(
+      () => {
+        for (const el of under) el.hidden = true;
+      },
+      () => {}, // cancelled by the unmount: the screen is gone anyway
+    );
   }
 
   return () => {

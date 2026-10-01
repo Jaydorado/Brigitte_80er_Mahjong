@@ -888,6 +888,11 @@
   padding: 40px 16px 10px;
 }
 
+/* Taken out of rendering under the opaque photo (closing.ts, showPhoto). */
+.closing-body[hidden] {
+  display: none;
+}
+
 .closing-main {
   flex: 1 1 60%;
   min-width: 0;

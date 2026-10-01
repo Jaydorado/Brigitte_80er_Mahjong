@@ -21,6 +21,11 @@ const h = vi.hoisted(() => {
     src = '';
     href = '';
     readonly style = { height: '', setProperty() {}, removeProperty() {} };
+    readonly classList = {
+      add: (name: string): void => {
+        if (!this.className.split(' ').includes(name)) this.className = `${this.className} ${name}`.trim();
+      },
+    };
     readonly listeners = new Map<string, Set<Listener>>();
     private text = '';
     constructor(readonly tag: string) {}
@@ -73,7 +78,9 @@ const h = vi.hoisted(() => {
     blur(): void {}
     select(): void {}
     animate(): { cancel(): void; finished: Promise<void> } {
-      return { cancel() {}, finished: Promise.resolve() };
+      const d = Promise.withResolvers<void>();
+      animations.push(d);
+      return { cancel() {}, finished: d.promise };
     }
     decode(): Promise<void> {
       const d = Promise.withResolvers<void>();
@@ -83,9 +90,11 @@ const h = vi.hoisted(() => {
   }
 
   const decodes: PromiseWithResolvers<void>[] = [];
+  const animations: PromiseWithResolvers<void>[] = [];
   return {
     FakeEl,
     decodes,
+    animations,
     log: [] as string[],
     saves: [] as unknown[],
     fxCount: 0,
@@ -124,6 +133,7 @@ describe('closing riddle', () => {
     h.log.length = 0;
     h.saves.length = 0;
     h.decodes.length = 0;
+    h.animations.length = 0;
     h.fxCount = 0;
     h.reduced = false;
     h.winListeners.clear();
@@ -296,6 +306,29 @@ describe('closing riddle', () => {
     await vi.advanceTimersByTimeAsync(1000);
     expect(photoShown(root)).toBe(true);
     expect(h.saves).toEqual([]);
+    unmount();
+  });
+
+  it.each([
+    ['a correct answer', won, (root: FakeEl) => answer(root, 'Gmunden')],
+    ['"Das Geheimnis"', { ...won, solved: true as const }, (root: FakeEl) => button(root, 'Das Geheimnis')!.dispatch('click')],
+  ])('leaves nothing animating under the photo after %s', async (_, save, accept) => {
+    const { root, unmount } = mount(save);
+    const screen = root.children[0] as FakeEl;
+    accept(root);
+    await decoded();
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(photoShown(root)).toBe(true);
+    const view = walk(root).find((e) => e.className === 'closing-photo')!;
+    const under = screen.children.filter((c): c is FakeEl => typeof c !== 'string' && c !== view);
+    expect(under.length).toBeGreaterThan(0);
+    // While the photo fades in over them, the bunting, clues and cake are frozen …
+    for (const el of under) expect(el.className.split(' ')).toContain('is-paused');
+    // … and once it is opaque they leave rendering, so the cake's endless loops cannot run on unseen.
+    for (const a of h.animations) a.resolve();
+    await vi.advanceTimersByTimeAsync(0);
+    const inView = (e: FakeEl | null): boolean => e !== null && (e === view || inView(e.parent));
+    expect(visible(root).filter((e) => e !== root && e !== screen && !inView(e))).toEqual([]);
     unmount();
   });
 
