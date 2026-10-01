@@ -1,6 +1,6 @@
 /**
  * The device-local save for Brigittes Mahjong: which levels are won, whether the welcome and
- * tutorial were seen, and how many attempts each level has cost.
+ * tutorial were seen, how many attempts each level has cost, and whether the riddle is solved.
  *
  * Anything unreadable, of the wrong shape, or of an unknown version falls back to a fresh save, so
  * a half-written or older payload can never block the game.
@@ -12,12 +12,14 @@ export interface SaveV1 {
   readonly welcomeSeen: boolean;
   readonly tutorialDone: boolean;
   readonly attempts: Readonly<Record<number, number>>;
+  /** Absent until the closing riddle is answered or revealed; never `false`. */
+  readonly solved?: true;
 }
 
 export const SAVE_KEY = 'mahjong80.save';
 
-/** The six levels of the game; the unlock walk stops here. */
-const LEVEL_COUNT = 6;
+/** The eight levels of the game; the unlock walk stops here. */
+const LEVEL_COUNT = 8;
 
 export function freshSave(): SaveV1 {
   return { version: 1, won: [], welcomeSeen: false, tutorialDone: false, attempts: {} };
@@ -37,6 +39,7 @@ function isSave(v: unknown): v is SaveV1 {
   for (const [k, n] of Object.entries(o.attempts)) {
     if (!/^\d+$/.test(k) || !isInt(n) || n < 0) return false;
   }
+  if ('solved' in o && o.solved !== true) return false;
   return true;
 }
 
@@ -84,4 +87,9 @@ export function nextAttempt(s: SaveV1, levelId: number): { save: SaveV1; attempt
 export function markWon(s: SaveV1, levelId: number): SaveV1 {
   if (s.won.includes(levelId)) return s;
   return { ...s, won: [...s.won, levelId] };
+}
+
+export function markSolved(s: SaveV1): SaveV1 {
+  if (s.solved === true) return s;
+  return { ...s, solved: true };
 }

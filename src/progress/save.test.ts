@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { currentLevel, freshSave, loadSave, markWon, nextAttempt, SAVE_KEY, unlocked, writeSave } from './save';
+import { currentLevel, freshSave, loadSave, markSolved, markWon, nextAttempt, SAVE_KEY, unlocked, writeSave, type SaveV1 } from './save';
 
 /** In-memory `Storage` so the tests never touch the DOM or a real origin's storage. */
 class MemoryStorage implements Storage {
@@ -51,6 +51,10 @@ describe('loadSave validation', () => {
     'wrong shape (won is a string)': JSON.stringify({ ...freshSave(), won: 'x' }),
     'unknown version': JSON.stringify({ ...freshSave(), version: 2 }),
     'missing field': JSON.stringify({ version: 1, won: [] }),
+    'a win beyond level 8': JSON.stringify({ ...freshSave(), won: [1, 9] }),
+    'solved: false': JSON.stringify({ ...freshSave(), solved: false }),
+    'solved: "false"': JSON.stringify({ ...freshSave(), solved: 'false' }),
+    'solved: {}': JSON.stringify({ ...freshSave(), solved: {} }),
   };
 
   for (const [name, raw] of Object.entries(cases)) {
@@ -61,7 +65,7 @@ describe('loadSave validation', () => {
     });
   }
 
-  it('falls back to a fresh save for a win list longer than the six levels, and never throws', () => {
+  it('falls back to a fresh save for a win list longer than the eight levels, and never throws', () => {
     const storage = new MemoryStorage();
     storage.setItem(SAVE_KEY, JSON.stringify({ ...freshSave(), won: Array(10_000).fill(1) }));
     const loaded = loadSave(storage);
@@ -76,6 +80,23 @@ describe('loadSave validation', () => {
     expect(loadSave(storage)).toEqual(freshSave());
     expect(unlocked({ ...freshSave(), won: [1, 1, 2] })).toBe(3);
   });
+
+  it('accepts every level 1…8 as won', () => {
+    const storage = new MemoryStorage();
+    const save = { ...freshSave(), won: [8, 1, 2, 3, 4, 5, 6, 7] };
+    storage.setItem(SAVE_KEY, JSON.stringify(save));
+    expect(loadSave(storage)).toEqual(save);
+  });
+
+  it('loads an old all-six save unchanged: levels 1–6 count as won and level 7 is next', () => {
+    const storage = new MemoryStorage();
+    const old = { version: 1, won: [1, 2, 3, 4, 5, 6], welcomeSeen: true, tutorialDone: true, attempts: { 1: 2, 6: 4 } };
+    storage.setItem(SAVE_KEY, JSON.stringify(old));
+    const loaded = loadSave(storage);
+    expect(loaded).toEqual(old);
+    expect(unlocked(loaded)).toBe(7);
+    expect(currentLevel(loaded)).toBe(7);
+  });
 });
 
 describe('unlocked', () => {
@@ -87,8 +108,8 @@ describe('unlocked', () => {
     expect(unlocked({ ...freshSave(), won: [1, 2] })).toBe(3);
   });
 
-  it('stops at level 6 when every level is won', () => {
-    expect(unlocked({ ...freshSave(), won: [1, 2, 3, 4, 5, 6] })).toBe(6);
+  it('stops at level 8 when every level is won', () => {
+    expect(unlocked({ ...freshSave(), won: [1, 2, 3, 4, 5, 6, 7, 8] })).toBe(8);
   });
 });
 
@@ -101,8 +122,8 @@ describe('currentLevel', () => {
     expect(currentLevel({ ...freshSave(), won: [1, 3] })).toBe(2);
   });
 
-  it('is null once all six levels are won', () => {
-    expect(currentLevel({ ...freshSave(), won: [1, 2, 3, 4, 5, 6] })).toBeNull();
+  it('is null once all eight levels are won', () => {
+    expect(currentLevel({ ...freshSave(), won: [1, 2, 3, 4, 5, 6, 7, 8] })).toBeNull();
   });
 });
 
@@ -137,5 +158,31 @@ describe('markWon', () => {
     const once = markWon(freshSave(), 2);
     expect(once.won).toEqual([2]);
     expect(markWon(once, 2)).toEqual(once);
+  });
+});
+
+describe('solved', () => {
+  const allWon = (): SaveV1 => ({ ...freshSave(), won: [1, 2, 3, 4, 5, 6, 7, 8] });
+
+  it('is absent on a fresh save and set by markSolved', () => {
+    expect('solved' in freshSave()).toBe(false);
+    expect(markSolved(allWon())).toEqual({ ...allWon(), solved: true });
+  });
+
+  it('solved: true round-trips through storage', () => {
+    const storage = new MemoryStorage();
+    const save = markSolved(allWon());
+    writeSave(storage, save);
+    expect(loadSave(storage)).toEqual(save);
+    expect(loadSave(storage).solved).toBe(true);
+  });
+
+  it('level writes keep it', () => {
+    const storage = new MemoryStorage();
+    const solved = markSolved(allWon());
+    const replayed = nextAttempt(solved, 3).save;
+    writeSave(storage, markWon(replayed, 3));
+    expect(loadSave(storage).solved).toBe(true);
+    expect(loadSave(storage).attempts).toEqual({ 3: 1 });
   });
 });

@@ -1,7 +1,7 @@
 export interface Slot { col: number; row: number; layer: number } // half-tile units
 export interface Rect { col: number; row: number; w: number; h: number } // half-tile units
 export type Pair = readonly [number, number]; // slot indices
-export type LayoutId = 'rect' | 'gift' | 'flower' | 'balloons' | 'pyramid' | 'eighty';
+export type LayoutId = 'rect' | 'gift' | 'heart' | 'flower' | 'balloons' | 'train' | 'pyramid' | 'eighty';
 export interface Layout { id: LayoutId; slots: Slot[]; clueRect: Rect; certificate: Pair[] }
 export interface LayoutIndex { above: number[][]; left: number[][]; right: number[][] }
 
