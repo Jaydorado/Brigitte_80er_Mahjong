@@ -490,6 +490,27 @@ const wrongLine = (page: Page) => page.locator('.closing-answer .closing-wrong')
 const revealBtn = (page: Page) => page.getByRole('button', { name: 'Auflösung zeigen' });
 const photoView = (page: Page) => page.locator('.closing-photo');
 
+/** The closing screen's all-won save with a watcher in every document that numbers each image's decode() settling and its insertion into `.closing-photo-img`. */
+async function seedAllWon(page: Page): Promise<void> {
+  await seedSave(page, { won: ALL_WON });
+  await page.addInitScript(`(() => {
+    let seq = 0;
+    const decode = HTMLImageElement.prototype.decode;
+    HTMLImageElement.prototype.decode = function () {
+      const p = decode.call(this);
+      p.then(() => { if (this.__decodedSeq === undefined) this.__decodedSeq = ++seq; }, () => {}); // the app's own call settles first
+      return p;
+    };
+    new MutationObserver((records) => {
+      for (const r of records) for (const n of r.addedNodes) {
+        if (!(n instanceof Element)) continue;
+        const img = n.matches('.closing-photo-img') ? n : n.querySelector('.closing-photo-img');
+        if (img && img.__insertSeq === undefined) img.__insertSeq = ++seq;
+      }
+    }).observe(document, { childList: true, subtree: true });
+  })();`);
+}
+
 /** From the map of a finished game to the closing screen, by tapping the topper as a player does. */
 async function openClosing(page: Page): Promise<void> {
   await expect(page.locator('.screen.map')).toBeVisible();
@@ -513,8 +534,17 @@ async function expectPhotoView(page: Page): Promise<void> {
     .toBe('1');
   const img = view.locator('.closing-photo-img');
   await expect(img).toBeVisible();
-  const decoded = await img.evaluate((el: HTMLImageElement) => el.complete && el.naturalWidth > 0 && el.naturalHeight > 0);
-  expect(decoded, 'the photo is decoded').toBe(true);
+  // The displayed image decodes without error, and the app decoded it *before* putting it on screen: the
+  // watcher (seedAllWon) numbers the image's decode() settling and its insertion into the DOM.
+  const order = await img.evaluate(async (el: HTMLImageElement) => {
+    await el.decode(); // a rejection fails the test
+    const mark = el as HTMLImageElement & { __decodedSeq?: number; __insertSeq?: number };
+    return { loaded: el.complete && el.naturalWidth > 0 && el.naturalHeight > 0, decoded: mark.__decodedSeq, inserted: mark.__insertSeq };
+  });
+  expect(order.loaded, 'the photo is loaded').toBe(true);
+  expect(order.decoded, 'the app called decode() on the photo and it settled').toBeDefined();
+  expect(order.inserted, 'the photo was inserted into the DOM').toBeDefined();
+  expect(order.decoded!, 'the photo is decoded before it is inserted').toBeLessThan(order.inserted!);
   await expect(view.locator('.closing-photo-title')).toHaveText(reveal.title);
   await expect(view.locator('.closing-photo-message')).toHaveText(reveal.message);
   const credit = view.locator('.closing-photo-credit');
@@ -528,7 +558,7 @@ async function expectPhotoView(page: Page): Promise<void> {
 }
 
 test('10 answer: wrong ×3 offers Auflösung zeigen; a correct answer shows the photo and its credit; the save keeps solved', async ({ page }, info) => {
-  await seedSave(page, { won: ALL_WON });
+  await seedAllWon(page);
   await page.goto('/');
   await openClosing(page);
   await expect(page.getByText('Wohin geht die Reise?')).toBeVisible();
@@ -576,7 +606,7 @@ test('10 answer: wrong ×3 offers Auflösung zeigen; a correct answer shows the 
 });
 
 test('10 answer: Auflösung zeigen reveals the photo and saves solved', async ({ page }, info) => {
-  await seedSave(page, { won: ALL_WON });
+  await seedAllWon(page);
   await page.goto('/');
   await openClosing(page);
   for (let tries = 0; tries < 3; tries++) await submitAnswer(page, 'Salzburg');
@@ -588,7 +618,7 @@ test('10 answer: Auflösung zeigen reveals the photo and saves solved', async ({
 
 test('10 answer: with reduced motion the photo appears as soon as it is decoded', async ({ page }) => {
   await page.emulateMedia({ reducedMotion: 'reduce' });
-  await seedSave(page, { won: ALL_WON });
+  await seedAllWon(page);
   await page.goto('/');
   await openClosing(page);
   await submitAnswer(page, 'Gmunden');
@@ -597,7 +627,7 @@ test('10 answer: with reduced motion the photo appears as soon as it is decoded'
 
 for (const how of ['Zur Torte', 'system Back'] as const) {
   test(`10 answer: leaving by ${how} during the burst and the decode leaves no errors and no photo view`, async ({ page }) => {
-    await seedSave(page, { won: ALL_WON });
+    await seedAllWon(page);
     await page.goto('/');
     await openClosing(page);
     await submitAnswer(page, 'Gmunden');
@@ -619,7 +649,7 @@ for (const how of ['Zur Torte', 'system Back'] as const) {
 // Keyboard-height viewport: with the on-screen keyboard up in landscape only ~180 px are left.
 test('10 answer: at 640×180 the whole answer region is visible, with the field focused', async ({ page }, info) => {
   await page.setViewportSize({ width: 640, height: 180 });
-  await seedSave(page, { won: ALL_WON });
+  await seedAllWon(page);
   await page.goto('/');
   await openClosing(page);
   await answerField(page).focus();
@@ -678,7 +708,7 @@ async function warmServiceWorker(page: Page): Promise<string[]> {
 }
 
 test('11 offline first reveal: the correct answer shows the decoded photo and its credit', async ({ page, context }, info) => {
-  await seedSave(page, { won: ALL_WON });
+  await seedAllWon(page);
   const photoRequests = await warmServiceWorker(page);
   await context.setOffline(true);
   try {
@@ -693,7 +723,7 @@ test('11 offline first reveal: the correct answer shows the decoded photo and it
 });
 
 test('11 offline first reveal: Auflösung zeigen shows the decoded photo and its credit', async ({ page, context }, info) => {
-  await seedSave(page, { won: ALL_WON });
+  await seedAllWon(page);
   const photoRequests = await warmServiceWorker(page);
   await context.setOffline(true);
   try {
