@@ -5,6 +5,7 @@ import type { SaveV1 } from '../progress/save';
 import { buildBalloons, buildCake, lightCandle, pauseOnHidden, setCandleState, setTopperActive } from './art/cake';
 import type { CakeArt, CakeCandle } from './art/cake';
 import { atlasDpr, prebakeAtlas } from './atlas';
+import { depthCount } from './fit';
 import { measureFrame } from './frame';
 import { createFx } from './fx';
 import './screens.css';
@@ -171,13 +172,15 @@ export function mountMap(root: HTMLElement, opts: MapOpts): () => void {
   };
 
   // The level the pulsing candle opens is pre-baked in idle time (after any lighting moment), so its
-  // tap finds the atlas ready. The map and the level screens share the full-viewport, safe-area frame.
+  // tap finds the atlas ready. The map and the level screens share the full-viewport, safe-area frame,
+  // and the level screen acquires with these same faces and depth count.
   let gone = false;
   let stopPrebake: (() => void) | null = null;
   const prebake = (): void => {
     const level = levels.find((l) => l.id === current);
     if (gone || level === undefined) return;
-    stopPrebake = prebakeAtlas(level.faces, () => ({ w: measureFrame(screen, layouts[level.layoutId]).w, dpr: atlasDpr() }));
+    const layout = layouts[level.layoutId];
+    stopPrebake = prebakeAtlas(level.faces, depthCount(layout.slots), () => ({ w: measureFrame(screen, layout).w, dpr: atlasDpr() }));
   };
 
   if (holdFor !== undefined) {

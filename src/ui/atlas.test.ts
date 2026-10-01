@@ -1,10 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { layouts } from '../core/layouts';
+import { levels } from '../levels/levels';
 import {
-  createAtlasCache, createStepEstimate, MIN_IDLE_MS, RECENT_MS, RECENT_STEPS, SETUP_SEED_MS_PER_MPX, setUpBitmap,
-  STARVED_MS, STEP_MARGIN_MS, whenIdle, type Atlas, type AtlasCacheDeps, type BakeJob,
+  ATLAS_GUTTER, atlasLayout, atlasSize, cellOrigin, createAtlasCache, createStepEstimate, MIN_IDLE_MS, RECENT_MS, RECENT_STEPS,
+  SETUP_SEED_MS_PER_MPX, setUpBitmap, STARVED_MS, STEP_MARGIN_MS, whenIdle, type Atlas, type AtlasCacheDeps, type BakeJob,
 } from './atlas';
+import { depthCount } from './fit';
 
 const FACES = [0, 1, 2];
+/** Depth count of the fixture bakes. */
+const D = 2;
 const STEPS = 3;
 
 /** Lets every pending promise continuation run (the fakes below never touch a timer). */
@@ -19,14 +24,14 @@ async function settle(): Promise<void> {
  */
 function harness() {
   const idleQueue: (() => void)[] = [];
-  const bakes: { w: number; dpr: number }[] = [];
+  const bakes: { w: number; dpr: number; depths: number }[] = [];
   const loads: string[] = [];
   const revoked: Atlas[] = [];
   let exporting: PromiseWithResolvers<void> | null = null;
   let decoding: PromiseWithResolvers<void> | null = null;
   const deps: AtlasCacheDeps<string> = {
-    async draw(_faces, w, dpr, job) {
-      bakes.push({ w, dpr });
+    async draw(_faces, depths, w, dpr, job) {
+      bakes.push({ w, dpr, depths });
       for (let i = 0; i < STEPS; i++) await job.step();
       await exporting?.promise;
       return `blob:${w}@${dpr}#${bakes.length}`;
@@ -60,35 +65,56 @@ function harness() {
 }
 
 describe('atlas cache', () => {
-  it('keys on tile width and DPR: another size or DPR is another bake, the same one is shared', async () => {
+  it('keys on tile width, DPR and depth count: any other one is another bake, the same one is shared', async () => {
     const { cache, bakes } = harness();
-    const a = await cache.acquire(FACES, 40, 3);
-    const b = await cache.acquire(FACES, 40, 2);
-    const c = await cache.acquire(FACES, 41, 3);
-    const again = await cache.acquire(FACES, 40, 3);
-    expect(bakes).toEqual([{ w: 40, dpr: 3 }, { w: 40, dpr: 2 }, { w: 41, dpr: 3 }]);
-    expect(new Set([a, b, c]).size).toBe(3);
+    const a = await cache.acquire(FACES, D, 40, 3);
+    const b = await cache.acquire(FACES, D, 40, 2);
+    const c = await cache.acquire(FACES, D, 41, 3);
+    const d = await cache.acquire(FACES, D + 1, 40, 3);
+    const again = await cache.acquire(FACES, D, 40, 3);
+    expect(bakes).toEqual([
+      { w: 40, dpr: 3, depths: D }, { w: 40, dpr: 2, depths: D }, { w: 41, dpr: 3, depths: D }, { w: 40, dpr: 3, depths: D + 1 },
+    ]);
+    expect(new Set([a, b, c, d]).size).toBe(4);
     expect(again).toBe(a);
+  });
+
+  it('a pre-bake with another depth count is not taken for the level: the level bakes its own', async () => {
+    const { cache, bakes, idle } = harness();
+    cache.prebake(FACES, D, () => ({ w: 40, dpr: 3 }));
+    await idle();
+    await cache.acquire(FACES, D + 1, 40, 3);
+    expect(bakes).toEqual([{ w: 40, dpr: 3, depths: D }, { w: 40, dpr: 3, depths: D + 1 }]);
+  });
+
+  it('the map’s pre-bake is the atlas its level acquires: both pass the level’s faces and its layout’s depth count', async () => {
+    const { cache, bakes, idle } = harness();
+    const level = levels[levels.length - 1];
+    const depths = depthCount(layouts[level.layoutId].slots);
+    cache.prebake(level.faces, depths, () => ({ w: 47, dpr: 3 }));
+    await idle();
+    await cache.acquire(level.faces, depths, 47, 3);
+    expect(bakes).toEqual([{ w: 47, dpr: 3, depths }]);
   });
 
   it('a level acquiring a finished pre-bake gets it without baking again', async () => {
     const { cache, bakes, idle } = harness();
-    const stop = cache.prebake(FACES, () => ({ w: 40, dpr: 3 }));
+    const stop = cache.prebake(FACES, D, () => ({ w: 40, dpr: 3 }));
     await idle();
     stop(); // leaving the map after the pre-bake finished keeps it
-    const a = await cache.acquire(FACES, 40, 3);
+    const a = await cache.acquire(FACES, D, 40, 3);
     expect(bakes).toHaveLength(1);
     expect(a.url).toBe('blob:40@3#1');
   });
 
   it('a level acquiring in the same task as the map cancel takes the pre-bake over and finishes it without idle time', async () => {
     const { cache, bakes, idle, idleQueue } = harness();
-    const stop = cache.prebake(FACES, () => ({ w: 40, dpr: 3 }));
+    const stop = cache.prebake(FACES, D, () => ({ w: 40, dpr: 3 }));
     idleQueue.shift()!(); // the map idles once: the pre-bake starts and waits for its first step
     await settle();
     expect(bakes).toHaveLength(1);
     stop(); // router: unmount the map ...
-    const p = cache.acquire(FACES, 40, 3); // ... then mount the level, same task
+    const p = cache.acquire(FACES, D, 40, 3); // ... then mount the level, same task
     await expect(p).resolves.toMatchObject({ url: 'blob:40@3#1' });
     expect(idleQueue).toHaveLength(0); // no step waited for idle time after the take-over
     await idle();
@@ -97,41 +123,41 @@ describe('atlas cache', () => {
 
   it('leaving the map drops a pre-bake nobody took over; the level then bakes afresh', async () => {
     const { cache, bakes, idle, idleQueue } = harness();
-    const stop = cache.prebake(FACES, () => ({ w: 40, dpr: 3 }));
+    const stop = cache.prebake(FACES, D, () => ({ w: 40, dpr: 3 }));
     idleQueue.shift()!();
     await settle();
     stop();
     await idle();
     expect(idleQueue).toHaveLength(0); // the dropped bake asks for no more idle time
-    const a = await cache.acquire(FACES, 40, 3);
+    const a = await cache.acquire(FACES, D, 40, 3);
     expect(bakes).toHaveLength(2);
     expect(a.url).toBe('blob:40@3#2');
   });
 
   it('a cancel before the map was ever idle bakes nothing', async () => {
     const { cache, bakes, idle } = harness();
-    cache.prebake(FACES, () => ({ w: 40, dpr: 3 }))();
+    cache.prebake(FACES, D, () => ({ w: 40, dpr: 3 }))();
     await idle();
     expect(bakes).toHaveLength(0);
   });
 
   it('never revokes an atlas in use; keeps one unused spare and revokes older ones', async () => {
     const { cache, revoked } = harness();
-    const a = await cache.acquire(FACES, 40, 3);
-    const b = await cache.acquire(FACES, 41, 3);
-    const c = await cache.acquire(FACES, 42, 3);
+    const a = await cache.acquire(FACES, D, 40, 3);
+    const b = await cache.acquire(FACES, D, 41, 3);
+    const c = await cache.acquire(FACES, D, 42, 3);
     cache.release(a);
     expect(revoked).toEqual([]); // a is the spare
     cache.release(b);
     expect(revoked).toEqual([a]); // b is the newer spare
     expect(revoked).not.toContain(c);
-    expect(await cache.acquire(FACES, 41, 3)).toBe(b); // the spare is reused, not re-baked
+    expect(await cache.acquire(FACES, D, 41, 3)).toBe(b); // the spare is reused, not re-baked
   });
 
   it('after its export a pre-bake waits for idle time again before it decodes (so a hidden page holds it there)', async () => {
     const { cache, loads, idle, idleQueue, holdExport } = harness();
     const exported = holdExport();
-    cache.prebake(FACES, () => ({ w: 40, dpr: 3 }));
+    cache.prebake(FACES, D, () => ({ w: 40, dpr: 3 }));
     await idle(); // every draw step taken: the bake now waits on its export
     exported.resolve();
     await settle();
@@ -144,11 +170,11 @@ describe('atlas cache', () => {
   it('a level taking a pre-bake over after its export decodes at once, without idle time', async () => {
     const { cache, loads, idle, idleQueue, holdExport } = harness();
     const exported = holdExport();
-    cache.prebake(FACES, () => ({ w: 40, dpr: 3 }));
+    cache.prebake(FACES, D, () => ({ w: 40, dpr: 3 }));
     await idle();
     exported.resolve();
     await settle(); // waiting for idle time before the decode
-    const p = cache.acquire(FACES, 40, 3);
+    const p = cache.acquire(FACES, D, 40, 3);
     await expect(p).resolves.toMatchObject({ url: 'blob:40@3#1' });
     expect(loads).toEqual(['blob:40@3#1']);
     expect(idleQueue).toHaveLength(0);
@@ -156,49 +182,65 @@ describe('atlas cache', () => {
 
   it('a pre-bake cancelled during its export never decodes, is not cached, and the spare survives', async () => {
     const { cache, bakes, loads, revoked, idle, holdExport } = harness();
-    const spare = await cache.acquire(FACES, 40, 3);
+    const spare = await cache.acquire(FACES, D, 40, 3);
     cache.release(spare);
     const exported = holdExport();
-    const stop = cache.prebake(FACES, () => ({ w: 41, dpr: 3 }));
+    const stop = cache.prebake(FACES, D, () => ({ w: 41, dpr: 3 }));
     await idle(); // every draw step taken: the bake now waits on its export
     stop();
     exported.resolve();
     await idle();
     expect(loads).toEqual(['blob:40@3#1']); // only the spare was ever decoded
     expect(revoked).toEqual([]);
-    expect(await cache.acquire(FACES, 40, 3)).toBe(spare);
-    const fresh = await cache.acquire(FACES, 41, 3);
+    expect(await cache.acquire(FACES, D, 40, 3)).toBe(spare);
+    const fresh = await cache.acquire(FACES, D, 41, 3);
     expect(bakes).toHaveLength(3);
     expect(fresh.url).toBe('blob:41@3#3');
   });
 
   it('a pre-bake cancelled during its decode is revoked, not cached, and the spare survives', async () => {
     const { cache, bakes, revoked, idle, holdDecode } = harness();
-    const spare = await cache.acquire(FACES, 40, 3);
+    const spare = await cache.acquire(FACES, D, 40, 3);
     cache.release(spare);
     const decoded = holdDecode();
-    const stop = cache.prebake(FACES, () => ({ w: 41, dpr: 3 }));
+    const stop = cache.prebake(FACES, D, () => ({ w: 41, dpr: 3 }));
     await idle(); // drawn, exported, and now decoding
     stop();
     decoded.resolve();
     await settle();
     expect(revoked).toEqual([{ url: 'blob:41@3#2' }]);
-    expect(await cache.acquire(FACES, 40, 3)).toBe(spare);
-    await cache.acquire(FACES, 41, 3);
+    expect(await cache.acquire(FACES, D, 40, 3)).toBe(spare);
+    await cache.acquire(FACES, D, 41, 3);
     expect(bakes).toHaveLength(3);
   });
 
   it('a level acquiring in the same task as a cancel during the export still gets that atlas', async () => {
     const { cache, bakes, revoked, idle, holdExport } = harness();
     const exported = holdExport();
-    const stop = cache.prebake(FACES, () => ({ w: 40, dpr: 3 }));
+    const stop = cache.prebake(FACES, D, () => ({ w: 40, dpr: 3 }));
     await idle();
     stop();
-    const p = cache.acquire(FACES, 40, 3);
+    const p = cache.acquire(FACES, D, 40, 3);
     exported.resolve();
     await expect(p).resolves.toMatchObject({ url: 'blob:40@3#1' });
     expect(bakes).toHaveLength(1);
     expect(revoked).toEqual([]);
+  });
+});
+
+describe('atlas layout', () => {
+  it('holds one face cell per face and one body cell per depth, all distinct, in a bitmap just big enough', () => {
+    for (const level of levels) {
+      const depths = depthCount(layouts[level.layoutId].slots);
+      const a = atlasLayout(level.faces, depths, 47, 3);
+      const cells = [...level.faces.map((f) => a.index.get(f)!), ...a.bodies];
+      expect(a.bodies).toHaveLength(depths);
+      expect(new Set(cells).size).toBe(level.faces.length + depths);
+      const size = atlasSize(a);
+      const ends = cells.map((c) => cellOrigin(a, c));
+      expect(Math.max(...ends.map((o) => o.x + a.cellW))).toBeLessThanOrEqual(size.w);
+      expect(Math.max(...ends.map((o) => o.y + a.cellH))).toBe(size.h - ATLAS_GUTTER); // the last row ends at the bottom gutter
+    }
   });
 });
 
@@ -340,7 +382,7 @@ describe('whenIdle', () => {
     const loads: string[] = [];
     let n = -1;
     const cache = createAtlasCache<string>({
-      async draw(_faces, w, dpr, job) {
+      async draw(_faces, _depths, w, dpr, job) {
         const passes = createStepEstimate(2);
         for (let i = 0; i < 12; i++) {
           await job.step(() => passes.need);
@@ -358,7 +400,7 @@ describe('whenIdle', () => {
       revoke: () => {},
       idle: whenIdle,
     });
-    cache.prebake(FACES, () => ({ w: 40, dpr: 3 }));
+    cache.prebake(FACES, D, () => ({ w: 40, dpr: 3 }));
     for (let k = 0; k < 500 && loads.length === 0; k++) {
       idlePeriod(period(n));
       if (n >= 0) n++;

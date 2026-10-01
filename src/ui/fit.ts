@@ -1,7 +1,13 @@
 import type { Slot } from '../core/layout';
 
-/** Tile geometry in multiples of the face width w (aspect = h / w). */
-export const TILE = { aspect: 1.25, layerShift: 0.06, edge: 0.12, shadow: 0.06 } as const;
+/**
+ * Tile geometry in multiples of the face width w (aspect = h / w). The layer shift and the side edge
+ * are thick enough to tell the layers apart (feedback §1): a layout that does not fit is reshaped.
+ */
+export const TILE = { aspect: 1.25, layerShift: 0.14, edge: 0.22, shadow: 0.06 } as const;
+
+/** How far each depth's tile body is mixed toward plum #3A1F2B; depth 0 is the layout's top layer. */
+export const SHADES: readonly number[] = [0, 0.1, 0.18, 0.25, 0.3];
 
 const HUD = 72;
 const MARGIN = 8;
@@ -19,6 +25,16 @@ export function extentOf(slots: readonly Slot[]): Extent {
     if (s.layer > maxLayer) maxLayer = s.layer;
   }
   return { across: (maxCol - minCol) / 2 + 1, down: (maxRow - minRow) / 2 + 1, maxLayer };
+}
+
+/** A slot's depth below the layout's highest layer (fixed per slot, whatever is left on the board). */
+export function depthOf(s: Slot, e: Extent): number {
+  return e.maxLayer - s.layer;
+}
+
+/** How many depths a layout uses: its layer count, upper layers included. */
+export function depthCount(slots: readonly Slot[]): number {
+  return extentOf(slots).maxLayer + 1;
 }
 
 /** Largest whole-pixel face width w that fits the extent (with layer shift, edge and shadow) into the area. */

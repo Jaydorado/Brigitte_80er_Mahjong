@@ -1,14 +1,16 @@
 /**
- * The baked tile atlas: every face a level uses, drawn once as a complete tile into one sprite
- * canvas and exported as a blob URL. Tiles show their cell through background-position, so the
- * board paints plain bitmaps instead of live SVG, shadows or filters.
+ * The baked tile atlas: one sprite canvas, exported as a blob URL, with two kinds of cell. A face
+ * cell per face holds its glyph on transparent; a body cell per depth holds the tile body shaded for
+ * that depth. A tile shows its face cell over its slot's body cell through two background layers, so
+ * the board paints plain bitmaps instead of live SVG, shadows or filters.
  *
- * Atlases are cached by faces, tile width and DPR. The map pre-bakes the level its candle opens in
- * short idle-time steps, so the tap finds the atlas ready; a level that asks for an atlas still in
- * that pre-bake takes it over and finishes it at once.
+ * Atlases are cached by faces, depth count, tile width and DPR. The map pre-bakes the level its candle
+ * opens in short idle-time steps, so the tap finds the atlas ready; a level that asks for an atlas
+ * still in that pre-bake takes it over and finishes it at once.
  */
 import { faceCorner, faceFile, type FaceId } from '../core/tiles';
 import { cellSize, drawBlankFrame, drawTileBody, drawTileFace, DISPLAY_FONT } from './art/tileArt';
+import { SHADES } from './fit';
 
 export interface Atlas {
   url: string;
@@ -19,8 +21,10 @@ export interface Atlas {
   cellH: number;
   cols: number;
   dpr: number;
-  /** Face → cell number, row-major. */
+  /** Face → its face cell number, row-major. */
   index: Map<FaceId, number>;
+  /** Depth → its body cell number, after the face cells. */
+  bodies: number[];
 }
 
 /** Transparent gap around every cell, device px, so neighbouring cells never bleed into a tile. */
@@ -62,9 +66,24 @@ export function cellOrigin(a: Pick<Atlas, 'cols' | 'cellW' | 'cellH'>, cell: num
 }
 
 /** Full bitmap size, device px. */
-export function atlasSize(a: Pick<Atlas, 'cols' | 'cellW' | 'cellH' | 'index'>): { w: number; h: number } {
-  const rows = Math.ceil(a.index.size / a.cols);
+export function atlasSize(a: Pick<Atlas, 'cols' | 'cellW' | 'cellH' | 'index' | 'bodies'>): { w: number; h: number } {
+  const rows = Math.ceil((a.index.size + a.bodies.length) / a.cols);
   return { w: ATLAS_GUTTER + a.cols * (a.cellW + ATLAS_GUTTER), h: ATLAS_GUTTER + rows * (a.cellH + ATLAS_GUTTER) };
+}
+
+/** The cells of an atlas for `faces` and `depths` body shades at face width `w` (CSS px) and `dpr`: a near-square grid. */
+export function atlasLayout(faces: readonly FaceId[], depths: number, w: number, dpr: number): Omit<Atlas, 'url' | 'image'> {
+  const size = cellSize(w);
+  const index = new Map<FaceId, number>();
+  faces.forEach((f, i) => index.set(f, i));
+  return {
+    cellW: Math.ceil(size.w * dpr),
+    cellH: Math.ceil(size.h * dpr),
+    cols: Math.ceil(Math.sqrt(faces.length + depths)),
+    dpr,
+    index,
+    bodies: Array.from({ length: depths }, (_, d) => faces.length + d),
+  };
 }
 
 /** How a bake paces itself. */
@@ -166,41 +185,32 @@ interface DrawnAtlas {
   blob: Blob;
 }
 
-/** Draws `faces` at face width `w` (CSS px) and `dpr` into one bitmap and exports it as a PNG. */
-async function draw(faces: readonly FaceId[], w: number, dpr: number, job: BakeJob): Promise<DrawnAtlas> {
+/** Draws `faces` and `depths` body cells at face width `w` (CSS px) and `dpr` into one bitmap and exports it as a PNG. */
+async function draw(faces: readonly FaceId[], depths: number, w: number, dpr: number, job: BakeJob): Promise<DrawnAtlas> {
   await document.fonts.load(`700 ${Math.round(w * 0.34)}px ${DISPLAY_FONT}`);
-  const size = cellSize(w);
-  const index = new Map<FaceId, number>();
-  faces.forEach((f, i) => index.set(f, i));
-  const layout = {
-    cellW: Math.ceil(size.w * dpr),
-    cellH: Math.ceil(size.h * dpr),
-    cols: Math.ceil(Math.sqrt(faces.length)),
-    dpr,
-    index,
-  };
+  const layout = atlasLayout(faces, depths, w, dpr);
   const px = atlasSize(layout);
   const canvas = document.createElement('canvas');
   try {
     // Setting up the bitmap (megabytes at DPR 3) takes steps of its own, apart from the first cell.
     const ctx = await setUpBitmap(canvas, px.w, px.h, job);
-    // Pre-baking, each cell is two steps, its body pass and then its face pass, and each waits for an
-    // idle period long enough for the slowest recent step of its kind.
+    // Pre-baking, each cell is one step, the body cells first and then the face cells, and each waits
+    // for an idle period long enough for the slowest recent step of its kind.
     const bodySteps = createStepEstimate(BODY_SEED_MS);
     const faceSteps = createStepEstimate(FACE_SEED_MS);
-    // Pre-baking, a cell's body step requests the next face but one and its face step the one after,
-    // so faces stay about two cells ahead while every SVG still parses in its own short task. A level
+    // Pre-baking, the body steps request the first two faces and face step i the one after i + 2, so
+    // faces stay about two cells ahead while every SVG still parses in its own short task. A level
     // waiting for the atlas requests all remaining faces at once.
     let requested = 0;
     const request = (n: number): void => {
       for (; requested < Math.min(n, faces.length); requested++) void faceImage(faces[requested]).catch(() => {});
     };
-    /** One pass over cell `i`: runs `paint` at the cell's origin, flushes it and times it (pre-baking). */
-    const pass = async (i: number, estimate: typeof bodySteps, lead: number, paint: () => void): Promise<void> => {
+    /** One step: runs `paint` at the origin of `cell`, flushes it and times it (pre-baking). */
+    const pass = async (cell: number, estimate: typeof bodySteps, ahead: number, paint: () => void): Promise<void> => {
       await job.step(() => estimate.need);
       const start = performance.now();
-      request(job.urgent ? faces.length : i + lead);
-      const o = cellOrigin(layout, i);
+      request(job.urgent ? faces.length : ahead);
+      const o = cellOrigin(layout, cell);
       ctx.setTransform(1, 0, 0, 1, o.x, o.y);
       paint();
       if (!job.urgent) {
@@ -208,12 +218,14 @@ async function draw(faces: readonly FaceId[], w: number, dpr: number, job: BakeJ
         estimate.record(performance.now() - start);
       }
     };
+    for (let d = 0; d < depths; d++) {
+      await pass(layout.bodies[d], bodySteps, 2, () => drawTileBody(ctx, w, dpr, SHADES[d]));
+    }
     for (let i = 0; i < faces.length; i++) {
       const f = faces[i];
       request(job.urgent ? faces.length : i + 1);
-      await pass(i, bodySteps, 2, () => drawTileBody(ctx, w, dpr));
       const image = await faceImage(f);
-      await pass(i, faceSteps, 3, () => {
+      await pass(i, faceSteps, i + 3, () => {
         drawTileFace(ctx, image, faceCorner(f), w, dpr);
         if (f === HAKU) drawBlankFrame(ctx, w, dpr);
       });
@@ -244,7 +256,7 @@ async function load({ layout, blob }: DrawnAtlas): Promise<Atlas> {
 
 /** `D` is a drawn, not yet decoded atlas. */
 export interface AtlasCacheDeps<D> {
-  draw(faces: readonly FaceId[], w: number, dpr: number, job: BakeJob): Promise<D>;
+  draw(faces: readonly FaceId[], depths: number, w: number, dpr: number, job: BakeJob): Promise<D>;
   load(drawn: D): Promise<Atlas>;
   revoke(a: Atlas): void;
   /** Runs `cb` once the page is idle with at least `need` to spare (a default when omitted); returns a cancel function. */
@@ -252,15 +264,19 @@ export interface AtlasCacheDeps<D> {
 }
 
 export interface AtlasCache {
-  /** The atlas for these faces at w and dpr: cached, taken over from a pre-bake, or baked now. Pair with `release`. */
-  acquire(faces: readonly FaceId[], w: number, dpr: number): Promise<Atlas>;
+  /**
+   * The atlas for these faces and `depths` body shades at w and dpr: cached, taken over from a pre-bake,
+   * or baked now. Pair with `release`.
+   */
+  acquire(faces: readonly FaceId[], depths: number, w: number, dpr: number): Promise<Atlas>;
   /** The screen no longer shows `a`; it stays cached as the spare until evicted. */
   release(a: Atlas): void;
   /**
    * Bakes in idle time at the size `size()` reports when idle begins. The returned cancel drops a
-   * bake still running, unless a level has acquired it meanwhile (even in the same task).
+   * bake still running, unless a level has acquired it meanwhile (even in the same task). A level
+   * finds the pre-bake only if it acquires with the same faces and depth count.
    */
-  prebake(faces: readonly FaceId[], size: () => { w: number; dpr: number }): () => void;
+  prebake(faces: readonly FaceId[], depths: number, size: () => { w: number; dpr: number }): () => void;
 }
 
 /**
@@ -282,7 +298,8 @@ export function createAtlasCache<D>(deps: AtlasCacheDeps<D>, spare = 1): AtlasCa
   const entries = new Map<string, Entry>();
   let clock = 0;
 
-  const keyOf = (faces: readonly FaceId[], w: number, dpr: number): string => `${w}@${dpr}:${faces.join(',')}`;
+  const keyOf = (faces: readonly FaceId[], depths: number, w: number, dpr: number): string =>
+    `${w}@${dpr}x${depths}:${faces.join(',')}`;
 
   const evict = (): void => {
     const unused = [...entries.values()].filter((e) => e.atlas !== null && e.users === 0).sort((a, b) => b.used - a.used);
@@ -292,7 +309,7 @@ export function createAtlasCache<D>(deps: AtlasCacheDeps<D>, spare = 1): AtlasCa
     }
   };
 
-  const start = (key: string, faces: readonly FaceId[], w: number, dpr: number, urgent: boolean): Entry => {
+  const start = (key: string, faces: readonly FaceId[], depths: number, w: number, dpr: number, urgent: boolean): Entry => {
     const e: Entry = { key, promise: Promise.resolve(null!), atlas: null, users: 0, used: ++clock, urgent, dropped: false, wake: null };
     const job: BakeJob = {
       get urgent() {
@@ -318,7 +335,7 @@ export function createAtlasCache<D>(deps: AtlasCacheDeps<D>, spare = 1): AtlasCa
     };
     entries.set(key, e);
     e.promise = deps
-      .draw(faces, w, dpr, job)
+      .draw(faces, depths, w, dpr, job)
       .then(async (drawn) => {
         // Exported: one more step before the blob URL and decode, so a hidden page holds here too and a
         // pre-bake dropped during the export stops without decoding.
@@ -344,9 +361,9 @@ export function createAtlasCache<D>(deps: AtlasCacheDeps<D>, spare = 1): AtlasCa
   };
 
   return {
-    acquire(faces, w, dpr) {
-      const key = keyOf(faces, w, dpr);
-      const e = entries.get(key) ?? start(key, faces, w, dpr, true);
+    acquire(faces, depths, w, dpr) {
+      const key = keyOf(faces, depths, w, dpr);
+      const e = entries.get(key) ?? start(key, faces, depths, w, dpr, true);
       e.users++;
       e.used = ++clock;
       if (!e.urgent) {
@@ -365,17 +382,17 @@ export function createAtlasCache<D>(deps: AtlasCacheDeps<D>, spare = 1): AtlasCa
       }
       deps.revoke(a);
     },
-    prebake(faces, size) {
+    prebake(faces, depths, size) {
       let e: Entry | null = null;
       const cancelIdle = deps.idle(() => {
         const { w, dpr } = size();
-        const key = keyOf(faces, w, dpr);
+        const key = keyOf(faces, depths, w, dpr);
         const hit = entries.get(key);
         if (hit) {
           hit.used = ++clock;
           return;
         }
-        e = start(key, faces, w, dpr, false);
+        e = start(key, faces, depths, w, dpr, false);
         e.promise.catch(() => {}); // dropped or failed: the level bakes on its own when it opens
       });
       return () => {
@@ -455,9 +472,12 @@ export function whenIdle(cb: () => void, need: IdleNeed = MIN_IDLE_MS): () => vo
 
 const cache = createAtlasCache({ draw, load, revoke: (a) => URL.revokeObjectURL(a.url), idle: whenIdle });
 
-/** The atlas for `faces` at face width `w` (CSS px) and `dpr`, decoded and ready to paint. Pair with `releaseAtlas`. */
-export function bakeAtlas(faces: readonly FaceId[], w: number, dpr: number): Promise<Atlas> {
-  return cache.acquire(faces, w, dpr);
+/**
+ * The atlas for `faces` and `depths` body shades at face width `w` (CSS px) and `dpr`, decoded and
+ * ready to paint. Pair with `releaseAtlas`.
+ */
+export function bakeAtlas(faces: readonly FaceId[], depths: number, w: number, dpr: number): Promise<Atlas> {
+  return cache.acquire(faces, depths, w, dpr);
 }
 
 export function releaseAtlas(a: Atlas): void {
@@ -465,6 +485,6 @@ export function releaseAtlas(a: Atlas): void {
 }
 
 /** Pre-bakes in idle time (see AtlasCache.prebake); returns the cancel function. */
-export function prebakeAtlas(faces: readonly FaceId[], size: () => { w: number; dpr: number }): () => void {
-  return cache.prebake(faces, size);
+export function prebakeAtlas(faces: readonly FaceId[], depths: number, size: () => { w: number; dpr: number }): () => void {
+  return cache.prebake(faces, depths, size);
 }

@@ -19,6 +19,7 @@ import { createBoard, type BoardView } from './board';
 import { createCluePaper } from './cluePaper';
 import { confirmLeave, showStuck } from './dialogs';
 import { createFx } from './fx';
+import { depthCount } from './fit';
 import { measureFrame, type Frame } from './frame';
 import { createHud } from './hud';
 import { startTutorial } from './tutorial';
@@ -357,7 +358,7 @@ export function mountLevel(root: HTMLElement, level: LevelDef, deps: LevelDeps):
     requested = { w, dpr };
     let next: Atlas;
     try {
-      next = await bakeAtlas(level.faces, w, dpr);
+      next = await bakeAtlas(level.faces, depthCount(layout.slots), w, dpr); // the map pre-bakes with these
     } catch (err) {
       if (bake === bakeGen) requested = { w: 0, dpr: 0 }; // let the next resize retry
       console.error('[level] atlas bake failed', err);

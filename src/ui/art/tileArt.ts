@@ -1,7 +1,8 @@
 /**
- * One complete mahjong tile, drawn once into an atlas cell (see atlas.ts). The cell origin is the
- * top-left corner of the face; the jade edge and the soft shadow extend to the right and bottom:
- * cell = (1 + edge + shadow) w wide and (aspect + edge + shadow) w tall, in CSS px times dpr.
+ * One mahjong tile, drawn into two atlas cells (see atlas.ts): a body cell (shadow, jade edge and
+ * ivory face, shaded by depth) and a face cell (the glyph on transparent), which the board stacks.
+ * The cell origin is the top-left corner of the face; the jade edge and the soft shadow extend to the
+ * right and bottom: cell = (1 + edge + shadow) w wide and (aspect + edge + shadow) w tall, in CSS px times dpr.
  */
 import { TILE } from '../fit';
 
@@ -34,12 +35,13 @@ function enterCell(ctx: CanvasRenderingContext2D, w: number, dpr: number): void 
 }
 
 /**
- * A tile is drawn in two passes, with its face's top-left at the context's current origin (device
- * px): this one, the shadow, jade edge and ivory face, then `drawTileFace` over it. The passes may
- * run in separate tasks; together they paint exactly what one pass would. All geometry is in CSS px
- * scaled by dpr; canvas shadows are in device px, so they scale by hand.
+ * A tile's body, with its face's top-left at the context's current origin (device px): the jade edge,
+ * the ivory face, then the shadow they cast. `shade` (0 … 1) mixes the edge and face pixels toward
+ * plum; the shadow stays as it is. `drawTileFace` paints the glyph into a cell of its own, which the
+ * board shows over this one. All geometry is in CSS px scaled by dpr; canvas shadows are in device
+ * px, so they scale by hand.
  */
-export function drawTileBody(ctx: CanvasRenderingContext2D, w: number, dpr: number): void {
+export function drawTileBody(ctx: CanvasRenderingContext2D, w: number, dpr: number, shade: number): void {
   const h = w * TILE.aspect;
   const e = w * TILE.edge;
   const r = w * 0.12;
@@ -47,19 +49,7 @@ export function drawTileBody(ctx: CanvasRenderingContext2D, w: number, dpr: numb
 
   enterCell(ctx, w, dpr);
 
-  // 1. The baked soft shadow, cast by the tile body onto the table, down and right.
-  ctx.save();
-  ctx.shadowColor = 'rgba(58, 31, 43, 0.5)';
-  ctx.shadowBlur = w * 0.045 * dpr;
-  ctx.shadowOffsetX = w * 0.018 * dpr;
-  ctx.shadowOffsetY = w * 0.022 * dpr;
-  ctx.fillStyle = mix(JADE_NEAR, JADE_FAR, 1);
-  ctx.beginPath();
-  ctx.roundRect(e, e, w, h, r);
-  ctx.fill();
-  ctx.restore();
-
-  // 2. The jade edge: the body extruded 0.12w right and down, one device pixel per step, darkening
+  // 1. The jade edge: the body extruded right and down, one device pixel per step, darkening
   //    from #3F7F6A at the face to #2E5E4F at the far edge.
   const steps = Math.max(1, Math.ceil(e * dpr));
   for (let i = steps; i >= 1; i--) {
@@ -80,7 +70,7 @@ export function drawTileBody(ctx: CanvasRenderingContext2D, w: number, dpr: numb
   ctx.roundRect(e * 0.22, e * 0.22, w, h, r);
   ctx.fill();
 
-  // 3. The ivory face: opaque rounded rect, vertical gradient, a rounded bevel and a 1 px highlight.
+  // 2. The ivory face: opaque rounded rect, vertical gradient, a rounded bevel and a 1 px highlight.
   const g = ctx.createLinearGradient(0, 0, 0, h);
   g.addColorStop(0, IVORY_TOP);
   g.addColorStop(1, IVORY_BOTTOM);
@@ -91,12 +81,12 @@ export function drawTileBody(ctx: CanvasRenderingContext2D, w: number, dpr: numb
 
   // Bevel: a soft warm shade along the bottom-right inside the rim, light along the top-left.
   const bevel = w * 0.05;
-  const shade = ctx.createLinearGradient(0, 0, w, h);
-  shade.addColorStop(0, 'rgba(255, 255, 255, 0.85)');
-  shade.addColorStop(0.45, 'rgba(255, 255, 255, 0)');
-  shade.addColorStop(0.6, 'rgba(176, 142, 92, 0)');
-  shade.addColorStop(1, 'rgba(176, 142, 92, 0.38)');
-  ctx.strokeStyle = shade;
+  const bevelLight = ctx.createLinearGradient(0, 0, w, h);
+  bevelLight.addColorStop(0, 'rgba(255, 255, 255, 0.85)');
+  bevelLight.addColorStop(0.45, 'rgba(255, 255, 255, 0)');
+  bevelLight.addColorStop(0.6, 'rgba(176, 142, 92, 0)');
+  bevelLight.addColorStop(1, 'rgba(176, 142, 92, 0.38)');
+  ctx.strokeStyle = bevelLight;
   ctx.lineWidth = bevel;
   ctx.beginPath();
   ctx.roundRect(bevel / 2, bevel / 2, w - bevel, h - bevel, Math.max(0, r - bevel / 2));
@@ -113,10 +103,28 @@ export function drawTileBody(ctx: CanvasRenderingContext2D, w: number, dpr: numb
   ctx.roundRect(px / 2, px / 2, w - px, h - px, r);
   ctx.stroke();
 
+  // 3. The depth shade over every body pixel drawn so far (edge and face), and nothing else.
+  if (shade > 0) {
+    ctx.globalCompositeOperation = 'source-atop';
+    ctx.fillStyle = `rgba(58, 31, 43, ${shade})`; // PLUM
+    ctx.fillRect(0, 0, e + w, e + h);
+  }
+
+  // 4. The baked soft shadow, cast by the tile body onto the table, down and right, behind the body.
+  ctx.globalCompositeOperation = 'destination-over';
+  ctx.shadowColor = 'rgba(58, 31, 43, 0.5)';
+  ctx.shadowBlur = w * 0.045 * dpr;
+  ctx.shadowOffsetX = w * 0.018 * dpr;
+  ctx.shadowOffsetY = w * 0.022 * dpr;
+  ctx.fillStyle = mix(JADE_NEAR, JADE_FAR, 1);
+  ctx.beginPath();
+  ctx.roundRect(e, e, w, h, r);
+  ctx.fill();
+
   ctx.restore();
 }
 
-/** The tile's second pass (see drawTileBody): its face art and corner mark. */
+/** The tile's face cell: its face art and corner mark on a transparent cell, drawn over the body by the board. */
 export function drawTileFace(
   ctx: CanvasRenderingContext2D, face: HTMLImageElement, corner: string, w: number, dpr: number,
 ): void {

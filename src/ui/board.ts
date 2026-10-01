@@ -1,12 +1,13 @@
 /**
- * The board: one flat `div.tile` per slot showing its atlas cell, stacked by layer, row and column;
- * one selection ring and up to two hint rings that move to their tiles. Taps are hit-tested in
- * layout math against the face rectangles, so tiles carry no listeners of their own.
+ * The board: one flat `div.tile` per slot showing two atlas cells, its face over the body shaded for
+ * the slot's depth, stacked by layer, row and column; one selection ring and up to two hint rings
+ * that move to their tiles. Taps are hit-tested in layout math against the face rectangles, so tiles
+ * carry no listeners of their own.
  */
 import type { GameState } from '../core/game';
 import type { Layout, Slot } from '../core/layout';
 import { atlasSize, cellOrigin, type Atlas } from './atlas';
-import { extentOf, slotPx, TILE, type Extent } from './fit';
+import { depthOf, extentOf, slotPx, TILE, type Extent } from './fit';
 
 export interface BoardView {
   el: HTMLElement;
@@ -61,8 +62,10 @@ export function createBoard(layout: Layout, atlas: Atlas, w: number): BoardView 
   const el = document.createElement('div');
   el.className = 'board';
   const sheet = atlasSize(atlas);
-  el.style.setProperty('--atlas', `url("${atlas.url}")`);
-  el.style.setProperty('--atlas-size', `${sheet.w / dpr}px ${sheet.h / dpr}px`);
+  // Two layers of the same image: the face cell (top) over the body cell (below).
+  el.style.setProperty('--atlas', `url("${atlas.url}"), url("${atlas.url}")`);
+  const sheetSize = `${sheet.w / dpr}px ${sheet.h / dpr}px`;
+  el.style.setProperty('--atlas-size', `${sheetSize}, ${sheetSize}`);
   el.style.setProperty('--cell-w', `${atlas.cellW / dpr}px`);
   el.style.setProperty('--cell-h', `${atlas.cellH / dpr}px`);
   el.style.setProperty('--face-w', `${w}px`);
@@ -70,6 +73,13 @@ export function createBoard(layout: Layout, atlas: Atlas, w: number): BoardView 
   el.style.width = `${geo.width}px`;
   el.style.height = `${geo.height}px`;
 
+  const cellPosition = (cell: number): string => {
+    const o = cellOrigin(atlas, cell);
+    return `${-o.x / dpr}px ${-o.y / dpr}px`;
+  };
+  // A tile element belongs to its slot, so its body (the slot's depth) never changes; the shade
+  // follows the slot whichever tile a removal, undo or shuffle puts there.
+  const bodyPosition = slots.map((s) => cellPosition(atlas.bodies[depthOf(s, geo.e)]));
   const tiles = slots.map((s) => {
     const t = document.createElement('div');
     t.className = 'tile';
@@ -138,8 +148,7 @@ export function createBoard(layout: Layout, atlas: Atlas, w: number): BoardView 
         if (face === null) {
           t.style.display = 'none';
         } else {
-          const o = cellOrigin(atlas, atlas.index.get(face)!);
-          t.style.backgroundPosition = `${-o.x / dpr}px ${-o.y / dpr}px`;
+          t.style.backgroundPosition = `${cellPosition(atlas.index.get(face)!)}, ${bodyPosition[i]}`;
           if (shownFace[i] === null) t.style.display = '';
         }
         shownFace[i] = face;
