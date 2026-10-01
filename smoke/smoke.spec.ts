@@ -35,7 +35,7 @@ test('1 welcome renders in portrait and landscape; Los geht\'s opens the map', a
 
   await start.click();
   await expect(page.locator('.screen.map')).toBeVisible();
-  await expect(page.locator('.cake-slot')).toHaveCount(6);
+  await expect(page.locator('.cake-slot')).toHaveCount(clues.length);
   await expect(candle(page, 1)).toHaveClass(/is-current/);
   expect((await readSave(page)).welcomeSeen).toBe(true);
   await shot(page, info, '01-map');
@@ -215,7 +215,7 @@ test('3 level 1 is won with Tipp twice and the ringed tiles; letter and map foll
   await shot(page, info, '03-level-1-won');
 
   const title = page.locator('.letter-title');
-  await expect(title).toHaveText('Hinweis 1 von 6', { timeout: 20_000 });
+  await expect(title).toHaveText(`Hinweis 1 von ${clues.length}`, { timeout: 20_000 });
   await expect(page.locator('.letter-clue')).toHaveText(clues[0]);
   const next = page.getByRole('button', { name: 'Weiter' });
   await expect(next).toBeEnabled();
@@ -234,7 +234,7 @@ test('3 level 1 is won with Tipp twice and the ringed tiles; letter and map foll
 test('4 the clue paper fits at ≥ 24 px on every level', async ({ page }, info) => {
   await seedSave(page, {});
   await boot(page);
-  for (let id = 1; id <= 6; id++) {
+  for (let id = 1; id <= clues.length; id++) {
     await openLevel(page, id);
     const fit = await page.evaluate(async (i) => {
       await document.fonts.ready;
@@ -261,7 +261,8 @@ test('4 the clue paper fits at ≥ 24 px on every level', async ({ page }, info)
 test('5 stuck path: Mischen, Letztes Paar zurück, and shuffle → undo', async ({ page }, info) => {
   await seedSave(page, {});
   await boot(page);
-  await openLevel(page, 3);
+  // Level 4 (flower): the old level 3 board. It leaves the most tiles when stuck, so the later stuck lines exist too.
+  await openLevel(page, 4);
   const dialog = page.locator('.dlg-stuck');
   const playToStuck = () =>
     page.evaluate(() => {
@@ -376,7 +377,7 @@ for (const how of ['hud', 'system'] as const) {
     await expect.poll(async () => (await readSave(page)).won).toEqual([1]);
     await expect(page.locator('.letter, .screen.map').first()).toBeVisible({ timeout: 20_000 });
     if (await page.locator('.letter').count()) {
-      await expect(page.locator('.letter-title')).toHaveText('Hinweis 1 von 6');
+      await expect(page.locator('.letter-title')).toHaveText(`Hinweis 1 von ${clues.length}`);
       await expect(page.getByRole('button', { name: 'Weiter' })).toBeEnabled();
       await shot(page, info, `07-${how}-letter`);
       await page.getByRole('button', { name: 'Weiter' }).click();
@@ -388,24 +389,24 @@ for (const how of ['hud', 'system'] as const) {
   });
 }
 
-test('8 winning level 6 after 1–5 opens its letter; Weiter lists all six clues', async ({ page }, info) => {
-  await seedSave(page, { won: [1, 2, 3, 4, 5] });
+test('8 winning the last level after the others opens its letter; Weiter lists every clue', async ({ page }, info) => {
+  const last = clues.length;
+  await seedSave(page, { won: Array.from({ length: last - 1 }, (_, i) => i + 1) });
   await boot(page);
   await expect(page.locator('.screen.map')).toBeVisible();
-  for (let n = 1; n <= 5; n++) await expect(candle(page, n)).toHaveClass(/is-won/);
-  await expect(candle(page, 6)).toHaveClass(/is-current/);
-  await shot(page, info, '08-map-five-won');
+  for (let n = 1; n < last; n++) await expect(candle(page, n)).toHaveClass(/is-won/);
+  await expect(candle(page, last)).toHaveClass(/is-current/);
+  await shot(page, info, '08-map-all-but-last-won');
 
-  await openLevel(page, 6);
-  await expect(hudCount(page)).toHaveText('96');
+  await openLevel(page, last);
   await page.evaluate(() => window.__mahjong!.playWitness(0));
-  await expect.poll(async () => (await readSave(page)).won).toEqual([1, 2, 3, 4, 5, 6]);
+  await expect.poll(async () => (await readSave(page)).won).toEqual(Array.from({ length: last }, (_, i) => i + 1));
 
-  await expect(page.locator('.letter-title')).toHaveText('Hinweis 6 von 6', { timeout: 25_000 });
-  await expect(page.locator('.letter-clue')).toHaveText(clues[5]);
+  await expect(page.locator('.letter-title')).toHaveText(`Hinweis ${last} von ${last}`, { timeout: 25_000 });
+  await expect(page.locator('.letter-clue')).toHaveText(clues[last - 1]!);
   const next = page.getByRole('button', { name: 'Weiter' });
   await expect(next).toBeEnabled();
-  await shot(page, info, '08-letter-6');
+  await shot(page, info, '08-letter-last');
   await next.click();
 
   await expect(page.locator('.screen.closing')).toBeVisible();
@@ -413,8 +414,72 @@ test('8 winning level 6 after 1–5 opens its letter; Weiter lists all six clues
   await shot(page, info, '08-closing');
   await page.getByRole('button', { name: 'Zur Torte' }).click();
   await expect(page.locator('.screen.map')).toBeVisible();
-  for (let n = 1; n <= 6; n++) await expect(candle(page, n)).toHaveClass(/is-won/);
+  for (let n = 1; n <= last; n++) await expect(candle(page, n)).toHaveClass(/is-won/);
   await shot(page, info, '08-map-all-won');
+});
+
+// Every level, not just the ones the other tests happen to use: the board paints from a decoded atlas at a
+// tile width that clears the 44 px floor, and a scripted win opens that level's own clue.
+for (let id = 1; id <= clues.length; id++) {
+  test(`8 level ${id}: the board paints and a scripted win shows its clue`, async ({ page }, info) => {
+    await seedSave(page, {});
+    await boot(page);
+    await openLevel(page, id);
+    const s = await expectSynced(page);
+    expect(s.tilesLeft, `level ${id} tiles`).toBeGreaterThan(0);
+    expect(s.tilesLeft % 2, `level ${id} has pairs only`).toBe(0);
+
+    const paint = await page.evaluate(async () => {
+      const screen = document.querySelector<HTMLElement>('.level')!;
+      const board = screen.querySelector<HTMLElement>('.board')!;
+      const atlas = board.style.getPropertyValue('--atlas');
+      const url = /url\("(blob:[^"]+)"\)/.exec(atlas)?.[1] ?? null; // the face and body layers share one image
+      let decoded = 0;
+      if (url !== null) {
+        const img = new Image();
+        img.src = url;
+        await img.decode();
+        decoded = img.naturalWidth * img.naturalHeight;
+      }
+      return { w: Number(screen.dataset.w), url, decoded };
+    });
+    expect(paint.url, `level ${id} atlas`).not.toBeNull();
+    expect(paint.decoded, `level ${id} atlas bitmap`).toBeGreaterThan(0);
+    expect(paint.w, `level ${id} tile width`).toBeGreaterThanOrEqual(44);
+    await shot(page, info, `08-level-${id}-board`);
+
+    await page.evaluate(() => window.__mahjong!.playWitness(0));
+    await expect.poll(async () => (await readSave(page)).won).toContain(id);
+    await expect(page.locator('.letter-title')).toHaveText(`Hinweis ${id} von ${clues.length}`, { timeout: 25_000 });
+    await expect(page.locator('.letter-clue')).toHaveText(clues[id - 1]!);
+    await shot(page, info, `08-level-${id}-letter`);
+  });
+}
+
+// Eight 52 px targets share the top tier. At 640×360 both the centre and the edge (x ± 24) of every
+// candle must open its own level: neighbouring targets must not overlap, and no envelope may sit on top.
+test('8 candles: the centre and the edge of every candle open that candle’s level at 640×360', async ({ page }, info) => {
+  await page.setViewportSize({ width: 640, height: 360 });
+  await seedSave(page, { won: Array.from({ length: clues.length - 1 }, (_, i) => i + 1) }); // 1…n−1 won, the last one current: all tappable
+  await page.goto('/');
+  await expect(page.locator('.screen.map')).toBeVisible();
+  await expect(page.locator('.cake-slot')).toHaveCount(clues.length);
+  await expect(candle(page, clues.length)).toHaveClass(/is-current/);
+  await shot(page, info, '08-candle-taps-map');
+
+  for (let n = 1; n <= clues.length; n++) {
+    const rect = candle(page, n).locator('.cake-hit rect').first();
+    const box = (await rect.boundingBox())!;
+    expect(box.width, `candle ${n} hit width`).toBeGreaterThanOrEqual(52);
+    const y = box.y + box.height / 2;
+    const cx = box.x + box.width / 2;
+    for (const [where, x] of [['centre', cx], ['left edge', cx - 24], ['right edge', cx + 24]] as const) {
+      await page.mouse.click(x, y);
+      await expect(page.locator('.level'), `candle ${n} ${where}`).toHaveAttribute('data-level', String(n));
+      await page.evaluate(() => history.back());
+      await expect(page.locator('.screen.map')).toBeVisible();
+    }
+  }
 });
 
 test('9 offline: once the service worker is active, a reload renders the map', async ({ page, context }, info) => {
@@ -433,7 +498,7 @@ test('9 offline: once the service worker is active, a reload renders the map', a
   await context.setOffline(true);
   await page.reload();
   await expect(page.locator('.screen.map')).toBeVisible();
-  await expect(page.locator('.cake-slot')).toHaveCount(6);
+  await expect(page.locator('.cake-slot')).toHaveCount(clues.length);
   await shot(page, info, '09-map-offline');
   await context.setOffline(false);
 });
