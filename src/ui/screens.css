@@ -858,6 +858,15 @@
 
 /* ───────── closing ───────── */
 
+/* A flex column at the dynamic viewport height. With `interactive-widget=resizes-content` the keyboard
+   shrinks it; `closing.ts` sets an explicit height as the fallback. Short heights (keyboard up) switch
+   to the compact layout through the container query at the end. */
+.screen.closing {
+  bottom: auto;
+  height: 100dvh;
+  container-type: size;
+}
+
 .closing-bunting {
   position: absolute;
   top: 0;
@@ -875,15 +884,124 @@
   min-height: 0;
   display: flex;
   align-items: stretch;
-  gap: 18px;
-  padding: 40px 18px 10px;
+  gap: 16px;
+  padding: 40px 16px 10px;
 }
 
-.closing-parchment {
-  flex: 1 1 54%;
+.closing-main {
+  flex: 1 1 60%;
   min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* ── answer region: question, field, *Antworten*, the wrong-answer line, *Auflösung zeigen* ── */
+
+.closing-answer {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  margin: 0;
+  padding: 8px 12px 10px;
+  border-radius: 10px;
+  border: 2px solid var(--gold);
+  background: linear-gradient(180deg, #fffdf8 0%, #fff3e6 100%);
+  box-shadow: 0 3px 10px rgba(58, 31, 43, 0.14);
+}
+
+.closing-question {
+  flex: 1 0 100%;
+  font: 700 24px/1.2 var(--font-display, Georgia, serif);
+  color: var(--berry);
+}
+
+.closing-input {
+  flex: 1 1 140px;
+  min-width: 0;
+  height: 52px;
   box-sizing: border-box;
-  padding: 10px 20px 12px;
+  margin: 0;
+  padding: 0 14px;
+  border: 2px solid var(--gold);
+  border-radius: 12px;
+  background: #fff;
+  color: var(--plum);
+  font: 400 22px/1 var(--font-ui);
+}
+
+.closing-input:focus {
+  border-color: var(--berry);
+  outline: 3px solid rgba(142, 47, 79, 0.25);
+  outline-offset: 0;
+}
+
+.closing-submit {
+  flex: none;
+  min-width: 0;
+  min-height: 52px;
+  padding: 0 20px;
+  font-size: 22px;
+}
+
+.closing-wrong {
+  flex: 1 0 100%;
+  order: 4;
+  margin: 0;
+  font: 700 20px/1.25 var(--font-ui);
+  color: var(--berry);
+}
+
+.closing-reveal {
+  flex: none;
+  order: 5;
+  min-height: 48px;
+  padding: 0 20px;
+  border: 2px solid var(--berry);
+  border-radius: 24px;
+  background: var(--cream);
+  color: var(--berry);
+  font: 700 20px/1 var(--font-display, Georgia, serif);
+  cursor: pointer;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.closing-reveal:focus-visible {
+  outline: 3px solid var(--gold);
+  outline-offset: 2px;
+}
+
+.closing-answer button:disabled,
+.closing-input:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.closing-answer.is-solved {
+  justify-content: center;
+  padding: 10px 12px;
+}
+
+.closing-secret {
+  min-width: 0;
+  min-height: 56px;
+  padding: 0 30px;
+  background: linear-gradient(180deg, #f6dfa0 0%, #d9b26f 55%, #b98d45 100%);
+  border-color: #fff3c4;
+  color: var(--plum);
+}
+
+/* ── clue list: fills the rest of the column and scrolls on its own ── */
+
+.closing-parchment {
+  flex: 1 1 auto;
+  min-height: 0;
+  box-sizing: border-box;
+  padding: 8px 18px 10px;
   overflow-y: auto;
   border-radius: 10px;
   border: 2px solid var(--gold);
@@ -937,7 +1055,7 @@
 }
 
 .closing-side {
-  flex: 1 1 46%;
+  flex: 1 1 40%;
   min-width: 0;
   display: flex;
   flex-direction: column;
@@ -976,6 +1094,85 @@
 
 .closing-back {
   flex: none;
+  min-width: 0;
+}
+
+/* ── photo view: one opacity fade (closing.ts), then still; under the effects canvas ── */
+
+.closing-photo {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  overflow: hidden;
+  background: linear-gradient(165deg, #6e2140 0%, #3a1f2b 100%);
+}
+
+.closing-photo-img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: 50% 35%;
+}
+
+/* The plaque sits over the sky left of the tower, the credit over the sky right of it, and the button
+   floats on the lake: the castle on the water stays clear from the spire down to the shore. */
+.closing-photo-plaque {
+  position: absolute;
+  top: max(12px, env(safe-area-inset-top));
+  left: max(14px, env(safe-area-inset-left));
+  box-sizing: border-box;
+  max-width: min(44%, 380px);
+  padding: 10px 16px 12px;
+  border-radius: 12px;
+  border: 2px solid var(--gold);
+  outline: 1px solid rgba(217, 178, 111, 0.7);
+  outline-offset: -7px;
+  background: rgba(255, 248, 238, 0.95);
+  box-shadow: 0 6px 18px rgba(58, 31, 43, 0.3);
+}
+
+.closing-photo-title {
+  margin: 0;
+  font: 700 30px/1.15 var(--font-display, Georgia, serif);
+  color: var(--berry);
+  text-wrap: balance;
+}
+
+.closing-photo-message {
+  margin: 6px 0 0;
+  font: 400 22px/1.3 var(--font-ui);
+  color: var(--plum);
+  text-wrap: pretty;
+}
+
+.closing-photo-credit {
+  position: absolute;
+  top: max(12px, env(safe-area-inset-top));
+  right: max(14px, env(safe-area-inset-right));
+  box-sizing: border-box;
+  max-width: min(36%, 340px);
+  margin: 0;
+  padding: 6px 12px 7px;
+  border-radius: 10px;
+  background: rgba(58, 31, 43, 0.62);
+  font: 400 20px/1.25 var(--font-ui);
+  color: var(--cream);
+  text-wrap: balance;
+}
+
+.closing-photo-link {
+  color: var(--gold-light);
+}
+
+.closing-photo-back {
+  position: absolute;
+  right: max(14px, env(safe-area-inset-right));
+  bottom: max(12px, env(safe-area-inset-bottom));
+  min-width: 0;
+  min-height: 56px;
+  box-shadow: 0 4px 14px rgba(58, 31, 43, 0.35);
 }
 
 @keyframes closing-fade {
@@ -1010,5 +1207,23 @@
 @media (orientation: portrait) {
   .closing-body {
     flex-direction: column;
+  }
+}
+
+/* Keyboard up (or any very short screen): the answer region takes the full width at the top, the
+   clue list the rest; the decoration and the side column step aside. */
+@container (max-height: 260px) {
+  .closing-bunting,
+  .closing-side {
+    display: none;
+  }
+  .closing-body {
+    padding: 6px 10px;
+  }
+  .closing-answer {
+    padding: 6px 12px 8px;
+  }
+  .closing-reveal {
+    order: 3;
   }
 }

@@ -111,6 +111,6 @@ function mount(root: HTMLElement, s: Screen): () => void {
       });
     }
     case 'closing':
-      return mountClosing(root, { onBack: () => show({ name: 'map' }) });
+      return mountClosing(root, { save, persist, onBack: () => show({ name: 'map' }) });
   }
 }
