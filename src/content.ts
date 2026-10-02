@@ -20,7 +20,7 @@ export const welcome = {
 };
 
 export const finale =
-  'Du hast alle acht Hinweise gefunden! Errätst du, was wir gemeinsam vorhaben? Wir freuen uns schon riesig darauf.';
+  'Du hast alle acht Hinweise gefunden! Errätst du, was wir gemeinsam vorhaben? Wir freuen uns schon.';
 
 // Nach dem gelösten Rätsel, über dem Foto.
 export const reveal = {
