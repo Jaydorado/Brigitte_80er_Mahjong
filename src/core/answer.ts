@@ -50,16 +50,11 @@ function hasTraunsee(tokens: string[]): boolean {
   );
 }
 
-// Rule 4: the closing `ort`/`orth` token counts only when it is the final token
-// or the next token contains no letter (digits only). Tokens are compared whole,
-// so "Ortner" never matches; "Schloss Ort am See" is therefore wrong.
+// Rule 4: an adjacent run of whole tokens anywhere in the answer; anything may follow it.
+// Tokens are compared whole, so "Ortner" and "Ortenberg" never match `ort`.
 function hasSchlossPhrase(tokens: string[]): boolean {
   return SCHLOSS_PHRASES.some((phrase) =>
-    tokens.some((_, start) => {
-      if (!phrase.every((p, k) => tokens[start + k] === p)) return false;
-      const next = tokens[start + phrase.length];
-      return next === undefined || !/[a-z]/.test(next);
-    }),
+    tokens.some((_, start) => phrase.every((p, k) => tokens[start + k] === p)),
   );
 }
 

@@ -16,6 +16,8 @@ const CORRECT = [
   'Schloss Orth',
   'Seeschloss Ort',
   'Schloss am Ort',
+  'Schloss Ort am See',
+  'Schloss Orth am Traunsee',
   'orth',
 ];
 

@@ -134,7 +134,7 @@ A pure function: `src/core/answer.ts` `isCorrectAnswer(input: string): boolean`.
 3. **Traunsee.** The token `traunsee`, or the adjacent tokens `traun` `see`.
 4. **Schloss phrases.** Exact adjacent token sequences:
    - `schloss ort`, `schloss orth`, `seeschloss ort`, `seeschloss orth`, `schloss am ort`.
-   - `ort`/`orth` must be the **final token or followed by a non-letter token**, never a prefix of a longer token. "Ortner" and "Ortenberg" stay wrong because tokens are compared whole.
+   - `ort`/`orth` must be a **whole token** (never a prefix of a longer token), and any tokens may follow it. "Ortner" and "Ortenberg" stay wrong because tokens are compared whole; "Schloss Ort am See" is correct (Jay, 2026-10-02; replaces R33).
 5. **`orth` alone.** Correct only when it is the **entire answer** (the token list is exactly `[orth]`).
 6. **Nothing else** is correct.
 
@@ -142,7 +142,7 @@ A pure function: `src/core/answer.ts` `isCorrectAnswer(input: string): boolean`.
 - **Correct:**
   - "Gmunden", "gmünden", "GMUNDEN!", "Reise nach Gmunden", "Reise Gmunden", "Gemunden", "Gmundn", "Gmünd";
   - "nach gmunden am traunsee", "Traunsee", "Traun See";
-  - "Schloss Orth", "Seeschloss Ort", "Schloss am Ort", "orth".
+  - "Schloss Orth", "Seeschloss Ort", "Schloss am Ort", "Schloss Ort am See", "Schloss Orth am Traunsee", "orth".
 - **Wrong:**
   - "", "   ", "Ort";
   - "Wien", "München", "Muenchen", "Salzburg", "Graz", "Linz", "Gaming", "Gänserndorf";
