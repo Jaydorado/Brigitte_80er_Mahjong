@@ -8,6 +8,8 @@ export interface LevelDef {
   faces: readonly FaceId[];
   clueIndex: 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7;
   difficulty: 'leicht' | 'mittel' | 'schwer';
+  /** The clue is shown at this multiple of the size the clue fitter picks (default 1). */
+  clueScale?: number;
 }
 
 const range = (from: number, to: number): FaceId[] => Array.from({ length: to - from + 1 }, (_, i) => from + i);
@@ -20,7 +22,7 @@ export const levels: readonly LevelDef[] = [
   { id: 5, layoutId: 'balloons', faces: [...range(0, 17), ...range(27, 30), 31, 32], clueIndex: 4, difficulty: 'mittel' },
   { id: 6, layoutId: 'train', faces: range(0, 33), clueIndex: 5, difficulty: 'schwer' },
   { id: 7, layoutId: 'pyramid', faces: range(0, 33), clueIndex: 6, difficulty: 'schwer' },
-  { id: 8, layoutId: 'eighty', faces: range(0, 33), clueIndex: 7, difficulty: 'schwer' },
+  { id: 8, layoutId: 'eighty', faces: range(0, 33), clueIndex: 7, difficulty: 'schwer', clueScale: 1.5 },
 ];
 
 export function attemptSeed(levelId: number, attempt: number): number {

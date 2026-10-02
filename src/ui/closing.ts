@@ -1,5 +1,5 @@
 import { isCorrectAnswer } from '../core/answer';
-import { clues, credit, finale, reveal } from '../content';
+import { clues, finale, reveal } from '../content';
 import { markSolved, type SaveV1 } from '../progress/save';
 import { buildBunting, buildMiniCake, pauseOnHidden } from './art/cake';
 import { createFx, type Fx } from './fx';
@@ -22,11 +22,10 @@ const T = {
 const PHOTO = {
   file: 'seeschloss-ort.webp',
   creator: 'Dimitry Anikin',
-  licence: 'CC0 1.0',
+  licence: 'CC0',
   licenceUrl: 'https://creativecommons.org/publicdomain/zero/1.0/',
   source: 'Wikimedia Commons',
   page: 'https://commons.wikimedia.org/wiki/File:Schlo%C3%9F_Ort_2.jpg',
-  changes: 'verkleinert, als WebP gespeichert',
 };
 
 const SHOW_MS = 4000;
@@ -242,13 +241,12 @@ export function mountClosing(root: HTMLElement, opts: ClosingOpts): () => void {
 
   const side = make('div', 'closing-side');
   const message = make('p', 'closing-finale', finale);
-  const signature = make('p', 'closing-credit', credit);
   const cake = buildMiniCake();
   const cakeBox = make('div', 'closing-cake');
   cakeBox.append(cake.svg);
   const back = make('button', 'btn-primary closing-back', T.back);
   back.type = 'button';
-  side.append(message, signature, cakeBox, back);
+  side.append(message, cakeBox, back);
 
   body.append(main, side);
   screen.append(bunting, body);
@@ -351,10 +349,9 @@ export function mountClosing(root: HTMLElement, opts: ClosingOpts): () => void {
     const photoCredit = make('p', 'closing-photo-credit');
     photoCredit.append(
       `${T.photoBy} ${PHOTO.creator} · `,
-      link(PHOTO.licence, PHOTO.licenceUrl),
-      ' · ',
       link(PHOTO.source, PHOTO.page),
-      ` · ${PHOTO.changes}`,
+      ' · ',
+      link(PHOTO.licence, PHOTO.licenceUrl),
     );
     const photoBack = make('button', 'btn-primary closing-photo-back', T.back);
     photoBack.type = 'button';

@@ -1,14 +1,14 @@
 // Texte für Brigittes Mahjong. Hier dürfen alle Texte geändert werden.
 // Reihenfolge der Hinweise = Level 1 bis 8.
 export const clues = [
-  'Familie',
-  'Reise',
-  '9h 31 Selzthal umsteigen',
-  'Grün/weiß',
+  'Österreich:Schweden - 8:5',
+  '10:16 Umstieg Selzthal',
+  'grün/weiß',
   'Übernachten bei Klaus & Albert unmöglich',
   'Hertha verbindet',
   'Bezirkschulinspektor',
   '12.2.1989',
+  'Reise',
 ] as const;
 
 export const welcome = {
@@ -21,7 +21,6 @@ export const welcome = {
 
 export const finale =
   'Du hast alle acht Hinweise gefunden! Errätst du, was wir gemeinsam vorhaben? Wir freuen uns schon riesig darauf.';
-export const credit = 'In Liebe, deine Familie';
 
 // Nach dem gelösten Rätsel, über dem Foto.
 export const reveal = {

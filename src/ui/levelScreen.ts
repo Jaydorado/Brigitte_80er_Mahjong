@@ -172,7 +172,7 @@ export function mountLevel(root: HTMLElement, level: LevelDef, deps: LevelDeps):
   root.append(screen);
   hud.update(state);
 
-  const paper = createCluePaper(clues[level.clueIndex]);
+  const paper = createCluePaper(clues[level.clueIndex], level.clueScale);
   const fx = createFx(screen);
   let alive = true;
   /** Bumped on unmount: every delayed step (stuck dialog, win sequence) checks it before acting. */

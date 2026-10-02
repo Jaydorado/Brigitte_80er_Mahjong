@@ -25,6 +25,10 @@ describe('levels', () => {
     expect(clues).toHaveLength(levels.length);
   });
 
+  it('only level 8 shows its clue larger than fitted, at 1.5x', () => {
+    expect(levels.filter((l) => l.clueScale !== undefined).map((l) => [l.id, l.clueScale])).toEqual([[8, 1.5]]);
+  });
+
   it('the new layouts get their planned face sets; the others keep their layout\'s set', () => {
     const byLayout = Object.fromEntries(levels.map((l) => [l.layoutId, [...l.faces]]));
     expect(byLayout.heart).toEqual([...range(0, 17), 31, 32, 33]);

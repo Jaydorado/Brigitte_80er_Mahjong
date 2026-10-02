@@ -1077,14 +1077,6 @@
   animation: closing-fade 1.2s 2.4s both;
 }
 
-.closing-credit {
-  margin: 0;
-  text-align: center;
-  font: 700 22px/1.2 var(--font-display, Georgia, serif);
-  color: var(--berry);
-  animation: closing-fade 1.2s 3.2s both;
-}
-
 .closing-cake {
   flex: 1 1 0;
   min-height: 0;
@@ -1121,8 +1113,8 @@
   object-position: 50% 35%;
 }
 
-/* The plaque sits over the sky left of the tower, the credit over the sky right of it, and the button
-   floats on the lake: the castle on the water stays clear from the spire down to the shore. */
+/* The plaque sits over the sky left of the tower; the credit is a quiet line on the lake at bottom left
+   and the button floats on the lake at bottom right: the castle stays clear from the spire to the shore. */
 .closing-photo-plaque {
   position: absolute;
   top: max(12px, env(safe-area-inset-top));
@@ -1148,27 +1140,29 @@
 .closing-photo-message {
   margin: 6px 0 0;
   font: 400 22px/1.3 var(--font-ui);
-  color: var(--plum);
+  color: var(--berry);
   text-wrap: pretty;
 }
 
+/* One soft line in the bottom-left corner of the lake; the photo is CC0, so this is courtesy, not a duty.
+   Colour at half opacity (no filter); the 12 px size is the credit's own call, outside the 20 px text floor. */
 .closing-photo-credit {
   position: absolute;
-  top: max(12px, env(safe-area-inset-top));
-  right: max(14px, env(safe-area-inset-right));
+  left: max(14px, env(safe-area-inset-left));
+  bottom: max(10px, env(safe-area-inset-bottom));
   box-sizing: border-box;
-  max-width: min(36%, 340px);
+  max-width: calc(100% - 28px - 150px);
   margin: 0;
-  padding: 6px 12px 7px;
-  border-radius: 10px;
-  background: rgba(58, 31, 43, 0.62);
-  font: 400 20px/1.25 var(--font-ui);
-  color: var(--cream);
-  text-wrap: balance;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font: 400 12px/1.3 var(--font-ui);
+  color: rgba(255, 248, 238, 0.5);
 }
 
 .closing-photo-link {
-  color: var(--gold-light);
+  color: inherit;
+  text-decoration: underline;
 }
 
 .closing-photo-back {
@@ -1203,8 +1197,7 @@
 @media (prefers-reduced-motion: reduce) {
   .closing-parchment,
   .closing-clues li,
-  .closing-finale,
-  .closing-credit {
+  .closing-finale {
     animation: none;
   }
 }

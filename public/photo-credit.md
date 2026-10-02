@@ -13,4 +13,4 @@ The reveal photo is a separately licensed work; this record pins it. It is not p
   - "Diese Datei wurde im Rahmen von WikiDaheim 2021 in Österreich erstellt und hochgeladen. Sie wurde dem Themenbereich Denkmalschutz zugeordnet."
 - **Original:** https://upload.wikimedia.org/wikipedia/commons/5/51/Schlo%C3%9F_Ort_2.jpg, 3465 × 2310 px, 5 318 476 bytes, SHA-1 `5c5f8827aa3b41c4bd163b85aeefa29f4a51a79b` (uploaded 2021-07-03)
 - **Modifications:** verkleinert, als WebP gespeichert (resized to 1280 × 853 px, WebP quality 0.80, 107 418 bytes; not cropped)
-- **Rendered credit in the app** (closing screen, photo view): "Foto: Dimitry Anikin · CC0 1.0 · Wikimedia Commons · verkleinert, als WebP gespeichert", with "CC0 1.0" linked to the licence URL and "Wikimedia Commons" linked to the file page.
+- **Rendered credit in the app** (closing screen, photo view): "Foto: Dimitry Anikin · Wikimedia Commons · CC0", one soft 12 px line, with "Wikimedia Commons" linked to the file page and "CC0" linked to the licence URL. CC0 asks for no attribution and no modification notice; the credit is a courtesy.

@@ -243,6 +243,7 @@ test('4 the clue paper fits at ≥ 24 px on every level', async ({ page }, info)
       return {
         id: i,
         px: parseFloat(getComputedStyle(text).fontSize),
+        basePx: parseFloat(paper.dataset.basePx!),
         scrollWidth: text.scrollWidth,
         clientWidth: text.clientWidth,
         scrollHeight: paper.scrollHeight,
@@ -254,6 +255,8 @@ test('4 the clue paper fits at ≥ 24 px on every level', async ({ page }, info)
     expect(fit.px, `level ${id} clue font size`).toBeGreaterThanOrEqual(24);
     expect(fit.scrollWidth, `level ${id} clue overflows sideways`).toBeLessThanOrEqual(fit.clientWidth);
     expect(fit.scrollHeight, `level ${id} clue overflows the paper`).toBeLessThanOrEqual(fit.clientHeight);
+    // Level 8's clue is shown at 1.5x the size the fitter picks for it; every other level is as fitted.
+    expect(fit.px / fit.basePx, `level ${id} clue size factor`).toBeCloseTo(id === 8 ? 1.5 : 1, 5);
     await shot(page, info, `04-level-${id}`);
   }
 });
@@ -546,14 +549,25 @@ async function expectPhotoView(page: Page): Promise<void> {
   expect(order.inserted, 'the photo was inserted into the DOM').toBeDefined();
   expect(order.decoded!, 'the photo is decoded before it is inserted').toBeLessThan(order.inserted!);
   await expect(view.locator('.closing-photo-title')).toHaveText(reveal.title);
-  await expect(view.locator('.closing-photo-message')).toHaveText(reveal.message);
+  const message = view.locator('.closing-photo-message');
+  await expect(message).toHaveText(reveal.message);
+  await expect(message).toHaveCSS('color', 'rgb(142, 47, 79)'); // berry #8e2f4f, the cake ribbon red
   const credit = view.locator('.closing-photo-credit');
   await expect(credit).toBeVisible();
-  for (const part of ['Dimitry Anikin', 'CC0 1.0', 'Wikimedia Commons', 'verkleinert, als WebP gespeichert']) {
-    await expect(credit, `credit mentions ${part}`).toContainText(part);
-  }
-  await expect(credit.getByRole('link', { name: 'CC0 1.0' })).toHaveAttribute('href', /creativecommons\.org/);
+  await expect(credit).toHaveText('Foto: Dimitry Anikin · Wikimedia Commons · CC0');
+  await expect(credit.getByRole('link', { name: 'CC0', exact: true })).toHaveAttribute('href', /creativecommons\.org/);
   await expect(credit.getByRole('link', { name: 'Wikimedia Commons' })).toHaveAttribute('href', /commons\.wikimedia\.org/);
+  // One soft 12 px line: half-opacity colour, no wrapping, no ellipsis needed.
+  await expect(credit).toHaveCSS('font-size', '12px');
+  await expect(credit).toHaveCSS('color', 'rgba(255, 248, 238, 0.5)');
+  const line = await credit.evaluate((el) => ({
+    height: el.getBoundingClientRect().height,
+    lineHeight: parseFloat(getComputedStyle(el).lineHeight),
+    scrollWidth: el.scrollWidth,
+    clientWidth: el.clientWidth,
+  }));
+  expect(line.height, 'credit wraps').toBeLessThanOrEqual(line.lineHeight + 1);
+  expect(line.scrollWidth, 'credit is cut off').toBeLessThanOrEqual(line.clientWidth);
   await expect(view.getByRole('button', { name: 'Zur Torte' })).toBeVisible();
 }
 
