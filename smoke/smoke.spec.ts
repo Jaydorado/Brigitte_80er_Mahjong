@@ -261,6 +261,37 @@ test('4 the clue paper fits at ≥ 24 px on every level', async ({ page }, info)
   }
 });
 
+test('4b level 8 shows its clue at exactly 1.5x the fitted size, whatever the viewport', async ({ page }) => {
+  await seedSave(page, {});
+  await boot(page);
+  // Taller landscape screens give bigger tiles and a taller paper, and every size must keep the factor.
+  for (const [width, height] of [[640, 360], [800, 360], [900, 430], [1000, 450], [1100, 520], [844, 390]] as const) {
+    await page.setViewportSize({ width, height });
+    await openLevel(page, 8);
+    const fit = await page.evaluate(async () => {
+      await document.fonts.ready;
+      const text = document.querySelector<HTMLElement>('.clue-text')!;
+      const paper = text.parentElement!;
+      return {
+        px: parseFloat(getComputedStyle(text).fontSize),
+        basePx: parseFloat(paper.dataset.basePx!),
+        scrollWidth: text.scrollWidth,
+        clientWidth: text.clientWidth,
+        scrollHeight: paper.scrollHeight,
+        clientHeight: paper.clientHeight,
+        // The card stays inside the covered clueRect (2 half-units high = 1.25 tile widths).
+        cardHeight: paper.getBoundingClientRect().height,
+        coveredHeight: 1.25 * Number(document.querySelector<HTMLElement>('.level')!.dataset.w),
+      };
+    });
+    const at = `${width}x${height}`;
+    expect(fit.px / fit.basePx, `${at}: size factor`).toBeCloseTo(1.5, 5);
+    expect(fit.scrollWidth, `${at}: overflows sideways`).toBeLessThanOrEqual(fit.clientWidth);
+    expect(fit.scrollHeight, `${at}: overflows the paper`).toBeLessThanOrEqual(fit.clientHeight);
+    expect(fit.cardHeight, `${at}: card outgrows the tiles over it`).toBeLessThanOrEqual(fit.coveredHeight);
+  }
+});
+
 test('5 stuck path: Mischen, Letztes Paar zurück, and shuffle → undo', async ({ page }, info) => {
   await seedSave(page, {});
   await boot(page);
@@ -637,6 +668,36 @@ test('10 answer: with reduced motion the photo appears as soon as it is decoded'
   await openClosing(page);
   await submitAnswer(page, 'Gmunden');
   await expectPhotoView(page);
+});
+
+test('10 answer: the whole photo credit stays visible beside the button at every supported size', async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await seedAllWon(page);
+  await page.goto('/');
+  await openClosing(page);
+  await submitAnswer(page, 'Gmunden');
+  await expectPhotoView(page);
+  const credit = photoView(page).locator('.closing-photo-credit');
+  const back = photoView(page).getByRole('button', { name: 'Zur Torte' });
+  for (const [width, height] of [[640, 360], [800, 360], [320, 568], [360, 800], [568, 320]] as const) {
+    await page.setViewportSize({ width, height });
+    const at = `${width}x${height}`;
+    const box = async (l: Locator) => (await l.boundingBox())!;
+    const inside = (b: { x: number; y: number; width: number; height: number }) =>
+      b.x >= 0 && b.y >= 0 && b.x + b.width <= width && b.y + b.height <= height;
+    const links = [credit.getByRole('link', { name: 'Wikimedia Commons' }), credit.getByRole('link', { name: 'CC0', exact: true })];
+    expect(inside(await box(credit)), `${at}: credit is inside the screen`).toBe(true);
+    for (const l of links) expect(inside(await box(l)), `${at}: credit link is inside the screen`).toBe(true);
+    const clip = await credit.evaluate((el) => ({ sw: el.scrollWidth, cw: el.clientWidth }));
+    expect(clip.sw, `${at}: credit is cut off`).toBeLessThanOrEqual(clip.cw);
+    const c = await box(credit);
+    const b = await box(back);
+    expect(c.y >= b.y + b.height || c.x + c.width <= b.x, `${at}: credit overlaps the button`).toBe(true);
+    if (width >= 640) {
+      const line = await credit.evaluate((el) => ({ h: el.getBoundingClientRect().height, lh: parseFloat(getComputedStyle(el).lineHeight) }));
+      expect(line.h, `${at}: credit wraps`).toBeLessThanOrEqual(line.lh + 1);
+    }
+  }
 });
 
 for (const how of ['Zur Torte', 'system Back'] as const) {

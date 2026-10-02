@@ -356,7 +356,10 @@ export function mountClosing(root: HTMLElement, opts: ClosingOpts): () => void {
     const photoBack = make('button', 'btn-primary closing-photo-back', T.back);
     photoBack.type = 'button';
     photoBack.addEventListener('click', leave);
-    view.append(img, plaque, photoCredit, photoBack);
+    // The button and the credit share one foot at the bottom: the credit gets its own full-width row.
+    const foot = make('div', 'closing-photo-foot');
+    foot.append(photoBack, photoCredit);
+    view.append(img, plaque, foot);
     // Nothing may run on under the photo: the cake's flames, glows and sparkles loop forever. Frozen
     // while the photo fades in over them, then out of rendering. The photo only ever leaves for the map
     // (a fresh mount), so they never need to come back. Under reduced motion there is no fade: the
