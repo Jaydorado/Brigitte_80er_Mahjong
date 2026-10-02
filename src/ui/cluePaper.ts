@@ -1,8 +1,8 @@
 /**
  * The clue under the tiles: a cream paper card at the layout's clueRect, beneath every tile, with
  * the clue centred in the bundled display face at the largest whole px size that fits (≤ 64, ≥ 24).
- * A level may ask for `scale` > 1: its clue is then shown at exactly that multiple of the fitted size,
- * and the card grows a little around its centre if the larger text needs the room.
+ * A level may ask for `scale` > 1: its clue is then shown at that multiple of the fitted size, in a card
+ * that may grow a little around its centre, but never past the tile-covered clueRect (the size gives way).
  */
 import type { Layout } from '../core/layout';
 import { DISPLAY_FONT } from './art/tileArt';
@@ -35,6 +35,8 @@ export function createCluePaper(clue: string, scale = 1): CluePaper {
 
   /** The card as place() put it (board px): fitText may grow it around its centre and resets to this. */
   let placed = { x: 0, y: 0, h: 0 };
+  /** How much taller than placed the card may get: the inset on each side, i.e. up to the clueRect edge. */
+  let maxGrow = 0;
   return {
     el,
     place(layout, w) {
@@ -46,6 +48,7 @@ export function createCluePaper(clue: string, scale = 1): CluePaper {
         y: p.y + inset,
         h: (r.h / 2) * TILE.aspect * w - 2 * inset,
       };
+      maxGrow = 2 * inset;
       el.style.transform = `translate(${placed.x}px, ${placed.y}px)`;
       el.style.width = `${(r.w / 2) * w - 2 * inset}px`;
       el.style.height = `${placed.h}px`;
@@ -72,16 +75,32 @@ export function createCluePaper(clue: string, scale = 1): CluePaper {
       }
       const basePx = px;
       if (scale > 1) {
-        // The paper is cut for the fitted size, so the scaled clue never shrinks to fit it: the card
-        // loses its vertical padding and grows around its centre by what is still missing. That stays
-        // under the tiles (the card is inset 0.1w inside the covered clueRect, and the growth is a few px).
-        // The font's line-box overhang below the glyphs is blank, so the text box clips it and the card
-        // is sized to the text box.
-        px = basePx * scale;
+        // The paper is cut for the fitted size, so the scaled clue loses its vertical padding and the
+        // card grows around its centre by what is still missing. The card must never leave the
+        // tile-covered clueRect (paper showing around the tiles gives the clue away), so the growth is
+        // capped at the inset on each side, and the size gives way instead: the largest size up to
+        // scale x the fitted one whose card stays inside. The font's line-box overhang below the glyphs
+        // is blank, so the text box clips it and the card is sized to the text box.
         el.style.paddingBlock = '0';
         text.style.overflow = 'hidden';
-        text.style.fontSize = `${px}px`;
-        const grow = Math.max(0, Math.ceil(text.getBoundingClientRect().height) - el.clientHeight);
+        const boxAt = (size: number): number => {
+          text.style.fontSize = `${size}px`;
+          return Math.ceil(text.getBoundingClientRect().height);
+        };
+        const roomH = placed.h - 2 * parseFloat(getComputedStyle(el).borderTopWidth);
+        const limit = roomH + maxGrow;
+        let hi = basePx * scale;
+        let lo = basePx; // fits: it fit with the padding
+        if (boxAt(hi) <= limit) lo = hi;
+        else {
+          for (let step = 0; step < 8; step++) {
+            const mid = (lo + hi) / 2;
+            if (boxAt(mid) <= limit) lo = mid;
+            else hi = mid;
+          }
+        }
+        px = lo;
+        const grow = Math.max(0, boxAt(px) - roomH);
         if (grow > 0) {
           el.style.height = `${placed.h + grow}px`;
           el.style.transform = `translate(${placed.x}px, ${placed.y - grow / 2}px)`;

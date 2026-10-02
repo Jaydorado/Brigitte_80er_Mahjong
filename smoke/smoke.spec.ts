@@ -261,11 +261,15 @@ test('4 the clue paper fits at ≥ 24 px on every level', async ({ page }, info)
   }
 });
 
-test('4b level 8 shows its clue at exactly 1.5x the fitted size, whatever the viewport', async ({ page }) => {
+test('4b level 8 shows its clue at 1.5x the fitted size, capped so the card never leaves the tiles', async ({ page }) => {
   await seedSave(page, {});
   await boot(page);
-  // Taller landscape screens give bigger tiles and a taller paper, and every size must keep the factor.
-  for (const [width, height] of [[640, 360], [800, 360], [900, 430], [1000, 450], [1100, 520], [844, 390]] as const) {
+  // Phones: the cap never binds, the factor is exactly 1.5. Bigger screens (bigger tiles, a taller
+  // paper) may pull the factor down, but the card must stay inside the tile-covered clueRect, because
+  // paper showing around the tiles gives the clue away.
+  const phones = [[640, 360], [800, 360], [844, 390], [900, 430]];
+  for (const [width, height] of [...phones, [1000, 450], [1100, 520], [1200, 620], [1400, 700]] as const) {
+    const phone = phones.some(([w, h]) => w === width && h === height);
     await page.setViewportSize({ width, height });
     await openLevel(page, 8);
     const fit = await page.evaluate(async () => {
@@ -285,11 +289,43 @@ test('4b level 8 shows its clue at exactly 1.5x the fitted size, whatever the vi
       };
     });
     const at = `${width}x${height}`;
-    expect(fit.px / fit.basePx, `${at}: size factor`).toBeCloseTo(1.5, 5);
+    if (phone) expect(fit.px / fit.basePx, `${at}: size factor`).toBeCloseTo(1.5, 5);
+    else expect(fit.px / fit.basePx, `${at}: size factor`).toBeGreaterThanOrEqual(1.3);
+    expect(fit.px / fit.basePx, `${at}: size factor`).toBeLessThanOrEqual(1.5 + 1e-9);
     expect(fit.scrollWidth, `${at}: overflows sideways`).toBeLessThanOrEqual(fit.clientWidth);
     expect(fit.scrollHeight, `${at}: overflows the paper`).toBeLessThanOrEqual(fit.clientHeight);
-    expect(fit.cardHeight, `${at}: card outgrows the tiles over it`).toBeLessThanOrEqual(fit.coveredHeight);
+    expect(fit.cardHeight, `${at}: card outgrows the tiles over it`).toBeLessThanOrEqual(fit.coveredHeight + 0.01);
   }
+});
+
+test('4c level 8: when 1.5x would not fit the covered clueRect, the size is capped, never the card grown past it', async ({ page }) => {
+  await seedSave(page, {});
+  await boot(page);
+  await page.setViewportSize({ width: 1200, height: 620 });
+  // A display face with a taller line box than ours, only for the scaled clue (its card has inline padding).
+  await page.addStyleTag({ content: '.clue-paper[style*="padding"] .clue-text { line-height: 1.3 !important; }' });
+  await openLevel(page, 8);
+  const fit = await page.evaluate(() => {
+    const lv = document.querySelector<HTMLElement>('.level')!;
+    const paper = document.querySelector<HTMLElement>('.clue-paper')!;
+    const text = paper.firstElementChild as HTMLElement;
+    return {
+      factor: parseFloat(paper.dataset.px!) / parseFloat(paper.dataset.basePx!),
+      px: parseFloat(paper.dataset.px!),
+      cardHeight: paper.getBoundingClientRect().height,
+      coveredHeight: 1.25 * Number(lv.dataset.w),
+      scrollWidth: text.scrollWidth,
+      clientWidth: text.clientWidth,
+      scrollHeight: paper.scrollHeight,
+      clientHeight: paper.clientHeight,
+      lineHeight: parseFloat(getComputedStyle(text).lineHeight),
+    };
+  });
+  expect(fit.lineHeight / fit.px, 'the taller line box is in effect').toBeCloseTo(1.3, 2);
+  expect(fit.cardHeight, 'card outgrows the tiles over it').toBeLessThanOrEqual(fit.coveredHeight + 0.01);
+  expect(fit.factor, 'the clue is still clearly enlarged').toBeGreaterThanOrEqual(1.3);
+  expect(fit.scrollWidth).toBeLessThanOrEqual(fit.clientWidth);
+  expect(fit.scrollHeight, 'text overflows the card').toBeLessThanOrEqual(fit.clientHeight);
 });
 
 test('5 stuck path: Mischen, Letztes Paar zurück, and shuffle → undo', async ({ page }, info) => {
